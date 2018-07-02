@@ -38,7 +38,7 @@ public class AccessMonitorRewriter extends MethodRewriter {
     private static final Pattern ifCalledFromPattern =
             Pattern.compile(conf.getMonitorConfig().getString("ifCalledFrom"));
 
-    private static final String resetMethodFqn =conf.getMonitorConfig().getString("resetMethodFqn");
+    private static final String resetMethodFqn = conf.getMonitorConfig().getString("resetMethodFqn");
 
     private static final HashMap<Long, List<LastAccess>> interestingWriteLocations = new HashMap<>();
     private static final HashMap<Long, LastAccess> writeLocations = new HashMap<>();
@@ -110,7 +110,7 @@ public class AccessMonitorRewriter extends MethodRewriter {
                 try {
                     if (last != null) {
                         boolean sameThis = ths == last.ths.get();
-                        boolean sameLocks = last.locks.containsAll(currentLocks);
+                        boolean sameLocks = last.locks.size() == currentLocks.size() && last.locks.containsAll(currentLocks);
                         boolean sameThread = thread.getId() == last.threadId;
                         boolean locksExists = !last.locks.isEmpty();
 
@@ -143,7 +143,8 @@ public class AccessMonitorRewriter extends MethodRewriter {
                         updateCommonLocks(hashCode, currentLocks);
                     } else writeLocations.put(hashCode, current);
                 } finally {
-                    if (synchronizedMethod) currentLocks.remove((Integer)thisHashCode);
+                    // We need to cast to `Integer` because otherwise it would be treated as index
+                    if (synchronizedMethod) currentLocks.remove((Integer) thisHashCode);
                 }
             }
         } finally {
@@ -192,7 +193,8 @@ public class AccessMonitorRewriter extends MethodRewriter {
     }
 
     public static void removeLockFromCurrentThread(Object o) {
-        locks.get().remove((Integer)System.identityHashCode(o));
+        // We need to cast to `Integer` because otherwise it would be treated as index
+        locks.get().remove((Integer) System.identityHashCode(o));
     }
 
     private boolean hasWriteInstructions(CodeIterator codeIterator) throws BadBytecode {
