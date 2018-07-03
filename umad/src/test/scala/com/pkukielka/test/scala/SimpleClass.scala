@@ -4,7 +4,6 @@ package com.pkukielka.test.scala
 import com.pkukielka.test.scala.Parallel.lock
 import com.pkukielka.test.scala.Parallel.lock2
 
-
 object Parallel {
   val lock = new Object
   val lock2 = new Object
@@ -15,6 +14,11 @@ trait SynchronizedOps {
   var _v: Int = 1
   def v_=(value: Int): Unit =  lock.synchronized { _v = value }
   def v: Int =  lock.synchronized(_v)
+
+  var c = 0
+  def synchronizedWrite(): Unit = synchronized {
+    c = 4
+  }
 }
 
 class SimpleClass extends SynchronizedOps {
@@ -50,8 +54,7 @@ class SimpleClass extends SynchronizedOps {
     innerNestedSynchronization()
     nestedVar2 = nestedVar2 * nestedVar1
   }
-
-
+  
   private var doubleSynchronizationState = 4
 
   def doubleSynchronization1() = Parallel.lock2.synchronized {

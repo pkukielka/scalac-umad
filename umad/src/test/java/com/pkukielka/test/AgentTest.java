@@ -36,8 +36,8 @@ class MyTest extends BaseForMyTest {
 
     void changeGlobalVar() {
         int x = 777;
-        globalVar =  1;
-        assert(x == 777);
+        globalVar = 1;
+        assert (x == 777);
     }
 
     void changeTransientInt() {
@@ -49,47 +49,49 @@ class MyTest extends BaseForMyTest {
         parentTransientInt = parentTransientInt * meaningOfLife;
     }
 
-    void changeGlobalDoubleVar() { globalVarDouble =  globalVarDouble * 2.5; }
+    void changeGlobalDoubleVar() {
+        globalVarDouble = globalVarDouble * 2.5;
+    }
 
     interface Str {
         String getStr();
     }
 
     void changeGlobalVarCompResult() {
-        globalObj =  ((Str) () -> "works").getStr();
+        globalObj = ((Str) () -> "works").getStr();
     }
 
     void writeToIntArray() {
         int i = 2;
         iarr[0] = i + 5;
-        assert(iarr[0] == 7);
+        assert (iarr[0] == 7);
     }
 
     void writeToDoubleArray() {
         darr[0] = 1.0;
         darr[1] = 2.0;
         darr[2] = darr[0] + darr[1];
-        assert(darr[2] == 3.0);
+        assert (darr[2] == 3.0);
     }
 
     void writeToLongArray() {
         larr[0] = 2L;
         larr[1] = 7L;
         larr[2] = larr[0] * larr[1];
-        assert(larr[2] == 14L);
+        assert (larr[2] == 14L);
     }
 
     void writeToStringArray() {
         sarr[0] = "X";
         sarr[1] = "Y";
         sarr[2] = sarr[0] + sarr[1];
-        assert("XY".equals(sarr[2]));
+        assert ("XY".equals(sarr[2]));
     }
 
     int interestingMethod() {
-        int [] arr2 = new int[5];
+        int[] arr2 = new int[5];
         arr2[1] = 4;
-        return meaningOfLife = 44  + arr2[1];
+        return meaningOfLife = 44 + arr2[1];
     }
 
     static int interestingStaticMethod() {
@@ -100,12 +102,24 @@ class MyTest extends BaseForMyTest {
         return meaningOfLife / 2;
     }
 
-    public synchronized int synchronizedMethod(){
+    public synchronized int synchronizedMethod() {
+        globalObj = "";
         meaningOfLife = universalRule / 3;
         return meaningOfLife;
     }
 
-    public static void resetState(){}
+    public static synchronized void staticSynchronizedMethod() {
+        globalObj = "";
+        return;
+    }
+
+    public static void synchronizedAndNotSynchronized() {
+        staticSynchronizedMethod();
+        universalRule = 12;
+    }
+
+    public static void resetState() {
+    }
 }
 
 public class AgentTest {
@@ -307,10 +321,40 @@ public class AgentTest {
     }
 
     @Test
+    public void testSynchronizedMethodFromTrait() throws InterruptedException {
+        final SimpleClass t = new SimpleClass();
+        startThreads(t::synchronizedWrite);
+
+        assert (!hasFailed());
+    }
+
+    @Test
     public void testSynchronizedMethod() throws InterruptedException {
         final MyTest t = new MyTest();
         startThreads(t::synchronizedMethod);
 
+        assert (!hasFailed());
+    }
+
+    @Test
+    public void testStaticSynchronizedMethod() throws InterruptedException {
+        startThreads(MyTest::synchronizedAndNotSynchronized);
+        assert (hasFailed());
+    }
+
+    @Test
+    public void testSynchronizedMethodFromDifferentObjects() throws InterruptedException {
+        final MyTest t1 = new MyTest();
+        final MyTest t2 = new MyTest();
+        startThreads(t1::synchronizedMethod);
+        startThreads(t2::synchronizedMethod);
+        assert (hasFailed());
+    }
+
+    @Test
+    public void testStaticSynchronizedMethodFromDifferentObjects() throws InterruptedException {
+        startThreads(MyTest::staticSynchronizedMethod);
+        startThreads(MyTest::staticSynchronizedMethod);
         assert (!hasFailed());
     }
 }
