@@ -41,10 +41,7 @@ public class ClassMethodSelector {
 
     private boolean doesDefinitionMatch(final ClassMethodDefinition definition, final String classNameDotted, final CtMethod editableMethod) {
         return definition.classRegex.matcher(classNameDotted).matches() &&
-                (editableMethod == null || (
-                        !editableMethod.isEmpty() &&
-                        (editableMethod.getModifiers() & AccessFlag.STATIC) == 0) &&
-                        definition.methodRegex.matcher(editableMethod.getName()).matches());
+                (editableMethod == null || definition.methodRegex.matcher(editableMethod.getName()).matches());
     }
 
     ClassMethodDefinition findMatchingDefinition(final String classNameDotted, final CtMethod editableMethod) {
