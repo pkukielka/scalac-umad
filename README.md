@@ -6,7 +6,7 @@ Setup:
 
 ```
 cd <WORKSPACE>
-git clone --recurse-submodules https://github.com/pkukielka/scala-umad.git
+git clone https://github.com/pkukielka/scala-umad.git
 git clone -b 2.13.x-parallelize https://github.com/rorygraves/scalac_perf.git
 
 cd <WORKSPACE>/scalac_perf
