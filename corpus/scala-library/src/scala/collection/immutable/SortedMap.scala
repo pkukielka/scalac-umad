@@ -11,6 +11,8 @@ trait SortedMap[K, +V]
     with collection.SortedMap[K, V]
     with SortedMapOps[K, V, SortedMap, SortedMap[K, V]] {
 
+  override def unsorted: Map[K, V] = this
+
   override def sortedMapFactory: SortedMapFactory[SortedMapCC] = SortedMap
 
   /** The same map with a given default function.
@@ -41,24 +43,25 @@ trait SortedMapOps[K, +V, +CC[X, +Y] <: Map[X, Y] with SortedMapOps[X, Y, CC, _]
      with collection.SortedMapOps[K, V, CC, C] { self =>
     protected def coll: C with CC[K, V]
 
+    def unsorted: Map[K, V]
+
     override def keySet: SortedSet[K] = new ImmutableKeySortedSet
 
     /** The implementation class of the set returned by `keySet` */
-    @SerialVersionUID(3L)
     protected class ImmutableKeySortedSet extends AbstractSet[K] with SortedSet[K] with GenKeySet with GenKeySortedSet {
       def rangeImpl(from: Option[K], until: Option[K]): SortedSet[K] = {
         val map = self.rangeImpl(from, until)
         new map.ImmutableKeySortedSet
       }
-      def incl(elem: K): SortedSet[K] = fromSpecificIterable(this).incl(elem)
-      def excl(elem: K): SortedSet[K] = fromSpecificIterable(this).excl(elem)
+      def incl(elem: K): SortedSet[K] = fromSpecific(this).incl(elem)
+      def excl(elem: K): SortedSet[K] = fromSpecific(this).excl(elem)
     }
 
     // We override these methods to fix their return type (which would be `Map` otherwise)
     def updated[V1 >: V](key: K, value: V1): CC[K, V1]
     @`inline` final override def +[V1 >: V](kv: (K, V1)): CC[K, V1] = updated(kv._1, kv._2)
 
-    override def concat[V2 >: V](xs: collection.Iterable[(K, V2)]): CC[K, V2] = {
+    override def concat[V2 >: V](xs: collection.IterableOnce[(K, V2)]): CC[K, V2] = {
         var result: CC[K, V2] = coll
         val it = xs.iterator
         while (it.hasNext) result = result + it.next()
@@ -68,14 +71,13 @@ trait SortedMapOps[K, +V, +CC[X, +Y] <: Map[X, Y] with SortedMapOps[X, Y, CC, _]
     override def transform[W](f: (K, V) => W): CC[K, W] = map({ case (k, v) => (k, f(k, v)) })
 }
 
+@SerialVersionUID(3L)
 object SortedMap extends SortedMapFactory.Delegate[SortedMap](TreeMap) {
 
-  @SerialVersionUID(3L)
   final class WithDefault[K, +V](underlying: SortedMap[K, V], defaultValue: K => V)
     extends Map.WithDefault[K, V](underlying, defaultValue)
       with SortedMap[K, V]
-      with SortedMapOps[K, V, SortedMap, WithDefault[K, V]]
-      with Serializable {
+      with SortedMapOps[K, V, SortedMap, WithDefault[K, V]] {
 
     implicit def ordering: Ordering[K] = underlying.ordering
 
@@ -94,12 +96,14 @@ object SortedMap extends SortedMapFactory.Delegate[SortedMap](TreeMap) {
     override def updated[V1 >: V](key: K, value: V1): WithDefault[K, V1] =
       new WithDefault[K, V1](underlying.updated(key, value), defaultValue)
 
-    override def remove(key: K): WithDefault[K, V] =
-      new WithDefault[K, V](underlying.remove(key), defaultValue)
+    override def concat [V2 >: V](xs: collection.IterableOnce[(K, V2)]): WithDefault[K, V2] =
+      new WithDefault( underlying.concat(xs) , defaultValue)
+
+    override def remove(key: K): WithDefault[K, V] = new WithDefault[K, V](underlying.remove(key), defaultValue)
 
     override def empty: WithDefault[K, V] = new WithDefault[K, V](underlying.empty, defaultValue)
 
-    override protected def fromSpecificIterable(coll: scala.collection.Iterable[(K, V)] @uncheckedVariance): WithDefault[K, V] =
+    override protected def fromSpecific(coll: scala.collection.IterableOnce[(K, V)] @uncheckedVariance): WithDefault[K, V] =
       new WithDefault[K, V](sortedMapFactory.from(coll), defaultValue)
 
     override protected def newSpecificBuilder: Builder[(K, V), WithDefault[K, V]] @uncheckedVariance =

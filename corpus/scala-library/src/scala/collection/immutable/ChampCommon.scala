@@ -3,6 +3,7 @@ package scala.collection.immutable
 
 import java.lang.Integer.bitCount
 import java.lang.Math.ceil
+import java.lang.System.arraycopy
 
 private[immutable] final object Node {
 
@@ -30,7 +31,7 @@ private[immutable] final object Node {
 
 }
 
-private[immutable] trait Node[T <: Node[T]] {
+private[immutable] abstract class Node[T <: Node[T]] {
 
   def hasNodes: Boolean
 
@@ -44,8 +45,28 @@ private[immutable] trait Node[T <: Node[T]] {
 
   def getPayload(index: Int): Any
 
+  def getHash(index: Int): Int
+
   def sizePredicate: Int
 
+  protected final def removeElement(as: Array[Int], ix: Int): Array[Int] = {
+    if (ix < 0) throw new ArrayIndexOutOfBoundsException
+    if (ix > as.length - 1) throw new ArrayIndexOutOfBoundsException
+    val result = new Array[Int](as.length - 1)
+    arraycopy(as, 0, result, 0, ix)
+    arraycopy(as, ix + 1, result, ix, as.length - ix - 1)
+    result
+  }
+
+  protected final def insertElement(as: Array[Int], ix: Int, elem: Int): Array[Int] = {
+    if (ix < 0) throw new ArrayIndexOutOfBoundsException
+    if (ix > as.length) throw new ArrayIndexOutOfBoundsException
+    val result = new Array[Int](as.length + 1)
+    arraycopy(as, 0, result, 0, ix)
+    result(ix) = elem
+    arraycopy(as, ix, result, ix + 1, as.length - ix)
+    result
+  }
 }
 
 /**
@@ -65,9 +86,9 @@ private[immutable] abstract class ChampBaseIterator[T <: Node[T]] {
   protected var currentValueLength: Int = 0
   protected var currentValueNode: T = _
 
-  private var currentStackLevel: Int = -1
-  private val nodeCursorsAndLengths: Array[Int] = new Array[Int](MaxDepth * 2)
-  private val nodes: Array[T] = new Array[Node[T]](MaxDepth).asInstanceOf[Array[T]]
+  private[this] var currentStackLevel: Int = -1
+  private[this] val nodeCursorsAndLengths: Array[Int] = new Array[Int](MaxDepth * 2)
+  private[this] val nodes: Array[T] = new Array[Node[T]](MaxDepth).asInstanceOf[Array[T]]
 
   def this(rootNode: T) = {
     this()
@@ -142,9 +163,9 @@ private[immutable] abstract class ChampBaseReverseIterator[T <: Node[T]] {
   protected var currentValueCursor: Int = -1
   protected var currentValueNode: T = _
 
-  private var currentStackLevel: Int = -1
-  private val nodeIndex: Array[Int] = new Array[Int](MaxDepth + 1)
-  private val nodeStack: Array[T] = new Array[Node[T]](MaxDepth + 1).asInstanceOf[Array[T]]
+  private[this] var currentStackLevel: Int = -1
+  private[this] val nodeIndex: Array[Int] = new Array[Int](MaxDepth + 1)
+  private[this] val nodeStack: Array[T] = new Array[Node[T]](MaxDepth + 1).asInstanceOf[Array[T]]
 
   def this(rootNode: T) = {
     this()

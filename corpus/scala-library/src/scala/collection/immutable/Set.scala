@@ -2,7 +2,9 @@ package scala
 package collection
 package immutable
 
-import scala.collection.mutable.Builder
+import java.io.{ObjectInputStream, ObjectOutputStream}
+
+import scala.collection.mutable.{Builder, ImmutableBuilder}
 import scala.language.higherKinds
 
 
@@ -41,9 +43,10 @@ trait SetOps[A, +CC[X], +C <: SetOps[A, CC, C]]
   def excl(elem: A): C
 
   /** Alias for `excl` */
-  @`inline` final def - (elem: A): C = excl(elem)
+  @deprecatedOverriding("This method should be final, but is not due to scala/bug#10853", "2.13.0")
+  /*@`inline` final*/ override def - (elem: A): C = excl(elem)
 
-  override def concat(that: collection.Iterable[A]): C = {
+  override def concat(that: collection.IterableOnce[A]): C = {
     var result: C = coll
     val it = that.iterator
     while (it.hasNext) result = result + it.next()
@@ -52,6 +55,18 @@ trait SetOps[A, +CC[X], +C <: SetOps[A, CC, C]]
 
   def diff(that: collection.Set[A]): C =
     toIterable.foldLeft(empty)((result, elem) => if (that contains elem) result else result + elem)
+
+  /** Creates a new $coll from this $coll by removing all elements of another
+    *  collection.
+    *
+    *  @param that the collection containing the elements to remove.
+    *  @return a new $coll with the given elements removed, omitting duplicates.
+    */
+  def removeAll(that: IterableOnce[A]): C = that.iterator.foldLeft[C](coll)(_ - _)
+
+  /** Alias for removeAll */
+  @deprecatedOverriding("This method should be final, but is not due to scala/bug#10853", "2.13.0")
+  override /*final*/ def -- (that: IterableOnce[A]): C = removeAll(that)
 }
 
 /**
@@ -59,6 +74,7 @@ trait SetOps[A, +CC[X], +C <: SetOps[A, CC, C]]
   * @define coll immutable set
   * @define Coll `immutable.Set`
   */
+@SerialVersionUID(3L)
 object Set extends IterableFactory[Set] {
 
   // getenv not getProperty for Scala.js friendliness.
@@ -72,18 +88,22 @@ object Set extends IterableFactory[Set] {
     it match {
       // We want `SortedSet` (and subclasses, such as `BitSet`) to
       // rebuild themselves to avoid element type widening issues
-      case _: SortedSet[E] => (newBuilder[E] ++= it).result()
-      case s: Set[E]       => s
-      case _               => (newBuilder[E] ++= it).result()
+      case _: SortedSet[E]         => (newBuilder[E] ++= it).result()
+      case _ if it.knownSize == 0  => empty[E]
+      case s: Set[E]               => s
+      case _                       => (newBuilder[E] ++= it).result()
     }
 
   def newBuilder[A]: Builder[A, Set[A]] =
-    if (useBaseline) HashSet.newBuilder else ChampHashSet.newBuilder
+    new ImmutableBuilder[A, Set[A]](empty) {
+      def addOne(elem: A): this.type = { elems = elems + elem; this }
+    }
 
   /** An optimized representation for immutable empty sets */
-  @SerialVersionUID(3L)
-  private object EmptySet extends AbstractSet[Any] with Serializable {
+  private object EmptySet extends AbstractSet[Any] {
     override def size: Int = 0
+    override def isEmpty = true
+    override def knownSize: Int = size
     def contains(elem: Any): Boolean = false
     def incl(elem: Any): Set[Any] = new Set1(elem)
     def excl(elem: Any): Set[Any] = this
@@ -93,9 +113,10 @@ object Set extends IterableFactory[Set] {
   private[collection] def emptyInstance: Set[Any] = EmptySet
 
   /** An optimized representation for immutable sets of size 1 */
-  @SerialVersionUID(3L)
-  final class Set1[A] private[collection] (elem1: A) extends AbstractSet[A] with Serializable {
+  final class Set1[A] private[collection] (elem1: A) extends AbstractSet[A] with StrictOptimizedIterableOps[A, Set, Set[A]] {
     override def size: Int = 1
+    override def isEmpty = false
+    override def knownSize: Int = size
     def contains(elem: A): Boolean = elem == elem1
     def incl(elem: A): Set[A] =
       if (contains(elem)) this
@@ -112,13 +133,13 @@ object Set extends IterableFactory[Set] {
       else None
     override def head: A = elem1
     override def tail: Set[A] = Set.empty
-    override def className: String = "Set"
   }
 
   /** An optimized representation for immutable sets of size 2 */
-  @SerialVersionUID(3L)
-  final class Set2[A] private[collection] (elem1: A, elem2: A) extends AbstractSet[A] with Serializable {
+  final class Set2[A] private[collection] (elem1: A, elem2: A) extends AbstractSet[A] with StrictOptimizedIterableOps[A, Set, Set[A]] {
     override def size: Int = 2
+    override def isEmpty = false
+    override def knownSize: Int = size
     def contains(elem: A): Boolean = elem == elem1 || elem == elem2
     def incl(elem: A): Set[A] =
       if (contains(elem)) this
@@ -144,13 +165,13 @@ object Set extends IterableFactory[Set] {
     }
     override def head: A = elem1
     override def tail: Set[A] = new Set1(elem2)
-    override def className: String = "Set"
   }
 
   /** An optimized representation for immutable sets of size 3 */
-  @SerialVersionUID(3L)
-  final class Set3[A] private[collection] (elem1: A, elem2: A, elem3: A) extends AbstractSet[A] with Serializable {
+  final class Set3[A] private[collection] (elem1: A, elem2: A, elem3: A) extends AbstractSet[A] with StrictOptimizedIterableOps[A, Set, Set[A]] {
     override def size: Int = 3
+    override def isEmpty = false
+    override def knownSize: Int = size
     def contains(elem: A): Boolean =
       elem == elem1 || elem == elem2 || elem == elem3
     def incl(elem: A): Set[A] =
@@ -179,18 +200,18 @@ object Set extends IterableFactory[Set] {
     }
     override def head: A = elem1
     override def tail: Set[A] = new Set2(elem2, elem3)
-    override def className: String = "Set"
   }
 
   /** An optimized representation for immutable sets of size 4 */
-  @SerialVersionUID(3L)
-  final class Set4[A] private[collection] (elem1: A, elem2: A, elem3: A, elem4: A) extends AbstractSet[A] with Serializable {
+  final class Set4[A] private[collection] (elem1: A, elem2: A, elem3: A, elem4: A) extends AbstractSet[A] with StrictOptimizedIterableOps[A, Set, Set[A]] {
     override def size: Int = 4
+    override def isEmpty = false
+    override def knownSize: Int = size
     def contains(elem: A): Boolean =
       elem == elem1 || elem == elem2 || elem == elem3 || elem == elem4
     def incl(elem: A): Set[A] =
       if (contains(elem)) this
-      else (if (useBaseline) HashSet.empty[A] else ChampHashSet.empty[A]) + elem1 + elem2 + elem3 + elem4 + elem
+      else (if (useBaseline) OldHashSet.empty[A] else HashSet.empty[A]) + elem1 + elem2 + elem3 + elem4 + elem
     def excl(elem: A): Set[A] =
       if (elem == elem1) new Set3(elem2, elem3, elem4)
       else if (elem == elem2) new Set3(elem1, elem3, elem4)
@@ -216,9 +237,14 @@ object Set extends IterableFactory[Set] {
     }
     override def head: A = elem1
     override def tail: Set[A] = new Set3(elem2, elem3, elem4)
-    override def className: String = "Set"
   }
+
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }
 
 /** Explicit instantiation of the `Set` trait to reduce class file size in subclasses. */
+@SerialVersionUID(3L)
 abstract class AbstractSet[A] extends scala.collection.AbstractSet[A] with Set[A]

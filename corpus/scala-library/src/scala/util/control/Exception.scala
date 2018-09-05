@@ -159,9 +159,9 @@ object Exception {
     def apply(x: Throwable): T = f(downcast(x).get)
   }
 
-  def mkThrowableCatcher[T](isDef: Throwable => Boolean, f: Throwable => T) = mkCatcher(isDef, f)
+  def mkThrowableCatcher[T](isDef: Throwable => Boolean, f: Throwable => T) = mkCatcher[Throwable, T](isDef, f)
 
-  implicit def throwableSubtypeToCatcher[Ex <: Throwable: ClassTag, T](pf: PartialFunction[Ex, T]) =
+  implicit def throwableSubtypeToCatcher[Ex <: Throwable: ClassTag, T](pf: PartialFunction[Ex, T]): Catcher[T] =
     mkCatcher(pf.isDefinedAt _, pf.apply _)
 
   /** !!! Not at all sure of every factor which goes into this,
@@ -177,7 +177,7 @@ object Exception {
 
   trait Described {
     protected val name: String
-    private var _desc: String = ""
+    private[this] var _desc: String = ""
     def desc = _desc
     def withDesc(s: String): this.type = {
       _desc = s
@@ -193,7 +193,7 @@ object Exception {
     protected val name = "Finally"
 
     def and(other: => Unit): Finally = new Finally({ body ; other })
-    def invoke() { body }
+    def invoke(): Unit = { body }
   }
 
   /** A container class for catch/finally logic.

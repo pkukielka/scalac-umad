@@ -2,22 +2,26 @@ package scala
 package collection
 package immutable
 
-import scala.collection.mutable.{Builder, ReusableBuilder}
+import java.io.{ObjectInputStream, ObjectOutputStream}
 
+import scala.collection.mutable.{Builder, ReusableBuilder}
 import scala.annotation.unchecked.uncheckedVariance
+import scala.runtime.Statics.releaseFence
 
 /** $factoryInfo
   * @define Coll `Vector`
   * @define coll vector
   */
+@SerialVersionUID(3L)
 object Vector extends StrictOptimizedSeqFactory[Vector] {
 
   def empty[A]: Vector[A] = NIL
 
   def from[E](it: collection.IterableOnce[E]): Vector[E] =
     it match {
-      case v: Vector[E] => v
-      case _            => (newBuilder ++= it).result()
+      case v: Vector[E]           => v
+      case _ if it.knownSize == 0 => empty[E]
+      case _                      => (newBuilder ++= it).result()
     }
 
   def newBuilder[A]: Builder[A, Vector[A]] = new VectorBuilder[A]
@@ -27,6 +31,11 @@ object Vector extends StrictOptimizedSeqFactory[Vector] {
   // Constants governing concat strategy for performance
   private final val Log2ConcatFaster = 5
   private final val TinyAppendFaster = 2
+
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }
 
 // in principle, most members should be private. however, access privileges must
@@ -48,34 +57,28 @@ object Vector extends StrictOptimizedSeqFactory[Vector] {
  *
  *  @define Coll `Vector`
  *  @define coll vector
- *  @define thatinfo the class of the returned collection. In the standard library configuration,
- *    `That` is always `Vector[B]` because an implicit of type `CanBuildFrom[Vector, B, That]`
- *    is defined in object `Vector`.
- *  @define bfinfo an implicit value of class `CanBuildFrom` which determines the
- *    result class `That` from the current representation type `Repr`
- *    and the new element type `B`. This is usually the `canBuildFrom` value
- *    defined in object `Vector`.
  *  @define orderDependent
  *  @define orderDependentFold
  *  @define mayNotTerminateInf
  *  @define willNotTerminateInf
  */
-@SerialVersionUID(3L)
 final class Vector[+A] private[immutable] (private[collection] val startIndex: Int, private[collection] val endIndex: Int, focus: Int)
   extends AbstractSeq[A]
     with IndexedSeq[A]
     with IndexedSeqOps[A, Vector, Vector[A]]
     with StrictOptimizedSeqOps[A, Vector, Vector[A]]
-    with VectorPointer[A @uncheckedVariance]
-    with Serializable { self =>
+    with VectorPointer[A @uncheckedVariance] { self =>
 
   override def iterableFactory: SeqFactory[Vector] = Vector
 
+  // Code paths that mutates `dirty` _must_ call `Statics.releaseFence()` before returning from
+  // the public method.
   private[immutable] var dirty = false
+  // While most JDKs would implicit add this fence because of >= 1 final field, the spec only mandates
+  // it if all fields are final, so let's add this in explicitly.
+  releaseFence()
 
   def length: Int = endIndex - startIndex
-
-  override def lengthCompare(len: Int): Int = length - len
 
   private[collection] def initIterator[B >: A](s: VectorIterator[B]): Unit = {
     s.initFrom(this)
@@ -83,10 +86,14 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
     if (s.depth > 1) s.gotoPos(startIndex, startIndex ^ focus)
   }
 
-  override def iterator: VectorIterator[A] = {
-    val s = new VectorIterator[A](startIndex, endIndex)
-    initIterator(s)
-    s
+  override def iterator: Iterator[A] = {
+    if(isEmpty)
+      Iterator.empty
+    else {
+      val s = new VectorIterator[A](startIndex, endIndex)
+      initIterator(s)
+      s
+    }
   }
 
   // Ideally, clients will inline calls to map all the way down, including the iterator/builder methods.
@@ -147,7 +154,7 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
   }
 
   override def head: A = {
-    if (isEmpty) throw new UnsupportedOperationException("empty.head")
+    if (isEmpty) throw new NoSuchElementException("empty.head")
     apply(0)
   }
 
@@ -167,44 +174,53 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
   }
 
   // appendAll (suboptimal but avoids worst performance gotchas)
-  override def appendedAll[B >: A](suffix: collection.Iterable[B]): Vector[B] = {
+  override def appendedAll[B >: A](suffix: collection.IterableOnce[B]): Vector[B] = {
     import Vector.{Log2ConcatFaster, TinyAppendFaster}
-    if (suffix.isEmpty) this
+    if (suffix.iterator.isEmpty) this
     else {
-      suffix.size match {
-        // Often it's better to append small numbers of elements (or prepend if RHS is a vector)
-        case n if n <= TinyAppendFaster || n < (this.size >>> Log2ConcatFaster) =>
-          var v: Vector[B] = this
-          for (x <- suffix) v = v :+ x
-          v
-        case n if this.size < (n >>> Log2ConcatFaster) && suffix.isInstanceOf[Vector[_]] =>
-          var v = suffix.asInstanceOf[Vector[B]]
-          val ri = this.reverseIterator
-          while (ri.hasNext) v = ri.next() +: v
-          v
+      suffix match {
+        case suffix: collection.Iterable[B] =>
+          suffix.size match {
+            // Often it's better to append small numbers of elements (or prepend if RHS is a vector)
+            case n if n <= TinyAppendFaster || n < (this.size >>> Log2ConcatFaster) =>
+              var v: Vector[B] = this
+              for (x <- suffix) v = v :+ x
+              v
+            case n if this.size < (n >>> Log2ConcatFaster) && suffix.isInstanceOf[Vector[_]] =>
+              var v = suffix.asInstanceOf[Vector[B]]
+              val ri = this.reverseIterator
+              while (ri.hasNext) v = ri.next() +: v
+              v
+            case _ => super.appendedAll(suffix)
+          }
         case _ => super.appendedAll(suffix)
       }
     }
   }
 
-  override def prependedAll[B >: A](prefix: collection.Iterable[B]): Vector[B] = {
+  override def prependedAll[B >: A](prefix: collection.IterableOnce[B]): Vector[B] = {
     // Implementation similar to `appendAll`: when of the collections to concatenate (either `this` or `prefix`)
     // has a small number of elements compared to the other, then we add them using `:+` or `+:` in a loop
     import Vector.{Log2ConcatFaster, TinyAppendFaster}
-    if (prefix.isEmpty) this
+    if (prefix.iterator.isEmpty) this
     else {
-      prefix.size match {
-        case n if n <= TinyAppendFaster || n < (this.size >>> Log2ConcatFaster) =>
-          var v: Vector[B] = this
-          val it = prefix.toIndexedSeq.reverseIterator
-          while (it.hasNext) v = it.next() +: v
-          v
-        case n if this.size < (n >>> Log2ConcatFaster) && prefix.isInstanceOf[Vector[_]] =>
-          var v = prefix.asInstanceOf[Vector[B]]
-          val it = this.iterator
-          while (it.hasNext) v = v :+ it.next()
-          v
-        case _ => super.prependedAll(prefix)
+      prefix match {
+        case prefix: collection.Iterable[B] =>
+          prefix.size match {
+            case n if n <= TinyAppendFaster || n < (this.size >>> Log2ConcatFaster) =>
+              var v: Vector[B] = this
+              val it = prefix.toIndexedSeq.reverseIterator
+              while (it.hasNext) v = it.next() +: v
+              v
+            case n if this.size < (n >>> Log2ConcatFaster) && prefix.isInstanceOf[Vector[_]] =>
+              var v = prefix.asInstanceOf[Vector[B]]
+              val it = this.iterator
+              while (it.hasNext) v = v :+ it.next()
+              v
+            case _ => super.prependedAll(prefix)
+          }
+        case _ =>
+          super.prependedAll(prefix)
       }
     }
   }
@@ -218,6 +234,7 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
     s.dirty = dirty
     s.gotoPosWritable(focus, idx, focus ^ idx)  // if dirty commit changes; go to new pos and prepare for writing
     s.display0(idx & 31) = elem.asInstanceOf[AnyRef]
+    releaseFence()
     s
   }
 
@@ -236,7 +253,7 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
   }
 
   override def prepended[B >: A](value: B): Vector[B] = {
-    if (endIndex != startIndex) {
+    val result = if (endIndex != startIndex) {
       val blockIndex = (startIndex - 1) & ~31
       val lo = (startIndex - 1) & 31
 
@@ -311,10 +328,12 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
       s.display0 = elems
       s
     }
+    releaseFence()
+    result
   }
 
   override def appended[B >: A](value: B): Vector[B] = {
-    if (endIndex != startIndex) {
+    val result = if (endIndex != startIndex) {
       val blockIndex = endIndex & ~31
       val lo = endIndex & 31
 
@@ -373,6 +392,8 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
       s.display0 = elems
       s
     }
+    releaseFence()
+    result
   }
 
 
@@ -412,33 +433,6 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
     val copy = new Array[AnyRef](array.length)
     java.lang.System.arraycopy(array, left, copy, left, copy.length - left)
     copy
-  }
-
-  private def preClean(depth: Int) = {
-    this.depth = depth
-    (depth - 1) match {
-      case 0 =>
-        display1 = null
-        display2 = null
-        display3 = null
-        display4 = null
-        display5 = null
-      case 1 =>
-        display2 = null
-        display3 = null
-        display4 = null
-        display5 = null
-      case 2 =>
-        display3 = null
-        display4 = null
-        display5 = null
-      case 3 =>
-        display4 = null
-        display5 = null
-      case 4 =>
-        display5 = null
-      case 5 =>
-    }
   }
 
   // requires structure is at index cutIndex and writable at level 0
@@ -536,6 +530,7 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
     s.gotoPosWritable(focus, blockIndex, focus ^ blockIndex)
     s.preClean(d)
     s.cleanLeftEdge(cutIndex - shift)
+    releaseFence()
     s
   }
 
@@ -551,24 +546,27 @@ final class Vector[+A] private[immutable] (private[collection] val startIndex: I
     s.gotoPosWritable(focus, blockIndex, focus ^ blockIndex)
     s.preClean(d)
     s.cleanRightEdge(cutIndex - shift)
+    releaseFence()
     s
   }
 
   override def toVector: Vector[A] = this
+
+  override protected[this] def className = "Vector"
 }
 
 class VectorIterator[+A](_startIndex: Int, endIndex: Int)
   extends AbstractIterator[A]
     with VectorPointer[A @uncheckedVariance] {
 
-  private var blockIndex: Int = _startIndex & ~31
-  private var lo: Int = _startIndex & 31
+  private[this] var blockIndex: Int = _startIndex & ~31
+  private[this] var lo: Int = _startIndex & 31
 
-  private var endLo = math.min(endIndex - blockIndex, 32)
+  private[this] var endLo = math.min(endIndex - blockIndex, 32)
 
   def hasNext = _hasNext
 
-  private var _hasNext = blockIndex + lo < endIndex
+  private[this] var _hasNext = blockIndex + lo < endIndex
 
   def next(): A = {
     if (!_hasNext) throw new NoSuchElementException("reached iterator end")
@@ -615,8 +613,8 @@ final class VectorBuilder[A]() extends ReusableBuilder[A, Vector[A]] with Vector
   display0 = new Array[AnyRef](32)
   depth = 1
 
-  private var blockIndex = 0
-  private var lo = 0
+  private[this] var blockIndex = 0
+  private[this] var lo = 0
 
   def size: Int = blockIndex + lo
   def isEmpty: Boolean = size == 0
@@ -641,12 +639,13 @@ final class VectorBuilder[A]() extends ReusableBuilder[A, Vector[A]] with Vector
     val s = new Vector[A](0, size, 0) // should focus front or back?
     s.initFrom(this)
     if (depth > 1) s.gotoPos(0, size - 1) // we're currently focused to size - 1, not size!
+    releaseFence()
     s
   }
 
   def clear(): Unit = {
+    preClean(1)
     display0 = new Array[AnyRef](32)
-    depth = 1
     blockIndex = 0
     lo = 0
   }
@@ -661,7 +660,35 @@ private[immutable] trait VectorPointer[T] {
     private[immutable] var display4: Array[AnyRef] = _
     private[immutable] var display5: Array[AnyRef] = _
 
-    // used
+    protected def preClean(depth: Int): Unit = {
+      this.depth = depth
+      (depth - 1) match {
+        case 0 =>
+          display1 = null
+          display2 = null
+          display3 = null
+          display4 = null
+          display5 = null
+        case 1 =>
+          display2 = null
+          display3 = null
+          display4 = null
+          display5 = null
+        case 2 =>
+          display3 = null
+          display4 = null
+          display5 = null
+        case 3 =>
+          display4 = null
+          display5 = null
+        case 4 =>
+          display5 = null
+        case 5 =>
+      }
+    }
+
+
+  // used
     private[immutable] final def initFrom[U](that: VectorPointer[U]): Unit = initFrom(that, that.depth)
 
     private[immutable] final def initFrom[U](that: VectorPointer[U], depth: Int) = {

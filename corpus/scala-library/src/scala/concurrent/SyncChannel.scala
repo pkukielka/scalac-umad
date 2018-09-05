@@ -13,14 +13,14 @@ package scala.concurrent
  *  data to be written has been read by a corresponding reader thread.
  *
  *  @author  Philipp Haller
- *  @version 2.0, 04/17/2008
+ *  @since 2.0
  */
 class SyncChannel[A] {
 
-  private var pendingWrites = List[(A, SyncVar[Boolean])]()
-  private var pendingReads  = List[SyncVar[A]]()
+  private[this] var pendingWrites = List[(A, SyncVar[Boolean])]()
+  private[this] var pendingReads  = List[SyncVar[A]]()
 
-  def write(data: A) {
+  def write(data: A): Unit = {
     // create write request
     val writeReq = new SyncVar[Boolean]
 

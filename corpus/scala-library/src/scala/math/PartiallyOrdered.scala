@@ -13,9 +13,8 @@ package math
 /** A class for partially ordered data.
  *
  *  @author  Martin Odersky
- *  @version 1.0, 23/04/2004
  */
-trait PartiallyOrdered[+A] {
+trait PartiallyOrdered[+A] extends Any {
 
   type AsPartiallyOrdered[B] = B => PartiallyOrdered[B]
 

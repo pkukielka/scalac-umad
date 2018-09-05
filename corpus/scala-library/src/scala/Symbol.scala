@@ -18,7 +18,7 @@ package scala
  *  `Symbol("mysym")`.
  *
  *  @author  Martin Odersky, Iulian Dragos
- *  @version 1.8
+ *  @since   1.7
  */
 final class Symbol private (val name: String) extends Serializable {
   /** Converts this symbol to a string.
@@ -45,10 +45,10 @@ private[scala] abstract class UniquenessCache[K, V >: Null]
   import java.util.WeakHashMap
   import java.util.concurrent.locks.ReentrantReadWriteLock
 
-  private val rwl = new ReentrantReadWriteLock()
-  private val rlock = rwl.readLock
-  private val wlock = rwl.writeLock
-  private val map = new WeakHashMap[K, WeakReference[V]]
+  private[this] val rwl = new ReentrantReadWriteLock()
+  private[this] val rlock = rwl.readLock
+  private[this] val wlock = rwl.writeLock
+  private[this] val map = new WeakHashMap[K, WeakReference[V]]
 
   protected def valueFromKey(k: K): V
   protected def keyFromValue(v: V): Option[K]

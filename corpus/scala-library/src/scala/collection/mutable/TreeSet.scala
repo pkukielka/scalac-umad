@@ -13,21 +13,18 @@ import java.lang.String
   * @tparam A the type of the keys contained in this tree set.
   *
   * @author Rui Gonçalves
-  * @version 2.12
   * @since 2.10
   *
   * @define Coll mutable.TreeSet
   * @define coll mutable tree set
   */
 // Original API designed in part by Lucien Pereira
-@SerialVersionUID(3L)
 sealed class TreeSet[A] private (tree: RB.Tree[A, Null])(implicit val ordering: Ordering[A])
   extends AbstractSet[A]
     with SortedSet[A]
     with SortedSetOps[A, TreeSet, TreeSet[A]]
     with StrictOptimizedIterableOps[A, Set, TreeSet[A]]
-    with StrictOptimizedSortedSetOps[A, TreeSet, TreeSet[A]]
-    with Serializable {
+    with StrictOptimizedSortedSetOps[A, TreeSet, TreeSet[A]] {
 
   if (ordering eq null)
     throw new NullPointerException("ordering must not be null")
@@ -59,16 +56,14 @@ sealed class TreeSet[A] private (tree: RB.Tree[A, Null])(implicit val ordering: 
 
   def contains(elem: A): Boolean = RB.contains(tree, elem)
 
-  def get(elem: A): Option[A] = RB.getKey(tree, elem)
-
   def unconstrained: collection.Set[A] = this
 
   def rangeImpl(from: Option[A], until: Option[A]): TreeSet[A] = new TreeSetProjection(from, until)
 
-  override def className: String = "TreeSet"
+  override protected[this] def className: String = "TreeSet"
 
   override def size: Int = RB.size(tree)
-
+  override def knownSize: Int = size
   override def isEmpty: Boolean = RB.isEmpty(tree)
 
   override def head: A = RB.minKey(tree).get
@@ -95,7 +90,6 @@ sealed class TreeSet[A] private (tree: RB.Tree[A, Null])(implicit val ordering: 
     * @param until the upper bound (exclusive) of this projection wrapped in a `Some`, or `None` if there is no upper
     *              bound.
     */
-  @SerialVersionUID(3L)
   private[this] final class TreeSetProjection(from: Option[A], until: Option[A]) extends TreeSet[A](tree) {
 
     /**
@@ -133,8 +127,9 @@ sealed class TreeSet[A] private (tree: RB.Tree[A, Null])(implicit val ordering: 
     override def iterator = RB.keysIterator(tree, from, until)
     override def iteratorFrom(start: A) = RB.keysIterator(tree, pickLowerBound(Some(start)), until)
 
-    override def size = iterator.length
-    override def isEmpty = !iterator.hasNext
+    override def size = if (RB.size(tree) == 0) 0 else iterator.length
+    override def knownSize: Int = if (RB.size(tree) == 0) 0 else -1
+    override def isEmpty = RB.size(tree) == 0 || !iterator.hasNext
 
     override def head = headOption.get
     override def headOption = {
@@ -171,6 +166,7 @@ sealed class TreeSet[A] private (tree: RB.Tree[A, Null])(implicit val ordering: 
   * @define coll mutable tree set
   * @author Lucien Pereira
   */
+@SerialVersionUID(3L)
 object TreeSet extends SortedIterableFactory[TreeSet] {
 
   def empty[A : Ordering]: TreeSet[A] = new TreeSet[A]()

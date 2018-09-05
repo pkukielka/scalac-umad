@@ -7,6 +7,7 @@ package mutable
  *  @define Coll `LinkedHashMap`
  *  @define coll linked hash map
  */
+@SerialVersionUID(3L)
 object LinkedHashMap extends MapFactory[LinkedHashMap] {
 
   def empty[A, B] = new LinkedHashMap[A, B]
@@ -22,10 +23,8 @@ object LinkedHashMap extends MapFactory[LinkedHashMap] {
   /** Class for the linked hash map entry, used internally.
     *  @since 2.8
     */
-  @SerialVersionUID(3L)
   private[mutable] final class LinkedEntry[K, V](val key: K, var value: V)
-    extends HashEntry[K, LinkedEntry[K, V]]
-      with Serializable {
+    extends HashEntry[K, LinkedEntry[K, V]] {
     var earlier: LinkedEntry[K, V] = null
     var later: LinkedEntry[K, V] = null
   }
@@ -45,12 +44,12 @@ object LinkedHashMap extends MapFactory[LinkedHashMap] {
  *  @define orderDependent
  *  @define orderDependentFold
  */
-@SerialVersionUID(3L)
 class LinkedHashMap[K, V]
   extends AbstractMap[K, V]
+    with SeqMap[K, V]
     with MapOps[K, V, LinkedHashMap, LinkedHashMap[K, V]]
     with StrictOptimizedIterableOps[(K, V), Iterable, LinkedHashMap[K, V]]
-    with Serializable {
+    with StrictOptimizedMapOps[K, V, LinkedHashMap, LinkedHashMap[K, V]] {
 
   override def mapFactory: MapFactory[LinkedHashMap] = LinkedHashMap
 
@@ -85,7 +84,8 @@ class LinkedHashMap[K, V]
 
   override def empty = LinkedHashMap.empty[K, V]
   override def size = table.tableSize
-
+  override def knownSize: Int = size
+  override def isEmpty: Boolean = table.tableSize == 0
   def get(key: K): Option[V] = {
     val e = table.findEntry(key)
     if (e == null) None
@@ -96,6 +96,11 @@ class LinkedHashMap[K, V]
     val e = table.findOrAddEntry(key, value)
     if (e eq null) None
     else { val v = e.value; e.value = value; Some(v) }
+  }
+
+  override def update(key: K, value: V): Unit = {
+    val e = table.findOrAddEntry(key, value)
+    if (e ne null) e.value = value
   }
 
   override def remove(key: K): Option[V] = {
@@ -116,31 +121,30 @@ class LinkedHashMap[K, V]
 
   def subtractOne(key: K): this.type = { remove(key); this }
 
-  def iterator: Iterator[(K, V)] = new Iterator[(K, V)] {
-    private var cur = firstEntry
+  def iterator: Iterator[(K, V)] = new AbstractIterator[(K, V)] {
+    private[this] var cur = firstEntry
     def hasNext = cur ne null
     def next() =
       if (hasNext) { val res = (cur.key, cur.value); cur = cur.later; res }
       else Iterator.empty.next()
   }
 
-  @SerialVersionUID(3L)
   protected class LinkedKeySet extends KeySet {
     override def iterableFactory: IterableFactory[collection.Set] = LinkedHashSet
   }
 
   override def keySet: collection.Set[K] = new LinkedKeySet
 
-  override def keysIterator: Iterator[K] = new Iterator[K] {
-    private var cur = firstEntry
+  override def keysIterator: Iterator[K] = new AbstractIterator[K] {
+    private[this] var cur = firstEntry
     def hasNext = cur ne null
     def next() =
       if (hasNext) { val res = cur.key; cur = cur.later; res }
       else Iterator.empty.next()
   }
 
-  override def valuesIterator: Iterator[V] = new Iterator[V] {
-    private var cur = firstEntry
+  override def valuesIterator: Iterator[V] = new AbstractIterator[V] {
+    private[this] var cur = firstEntry
     def hasNext = cur ne null
     def next() =
       if (hasNext) { val res = cur.value; cur = cur.later; res }
@@ -174,5 +178,7 @@ class LinkedHashMap[K, V]
     table = newHashTable
     table.init(in, table.createNewEntry(in.readObject().asInstanceOf[K], in.readObject().asInstanceOf[V]))
   }
+
+  override protected[this] def stringPrefix = "LinkedHashMap"
 }
 

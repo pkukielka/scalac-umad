@@ -1,10 +1,8 @@
 package scala
-package collection.mutable
+package collection
+package mutable
 
-import collection.{Iterator, SortedMapFactory, StrictOptimizedIterableOps}
 import collection.mutable.{RedBlackTree => RB}
-
-import java.lang.String
 
 /**
   * A mutable sorted map implemented using a mutable red-black tree as underlying data structure.
@@ -14,19 +12,18 @@ import java.lang.String
   * @tparam V the type of the values associated with the keys.
   *
   * @author Rui Gonçalves
-  * @version 2.12
   * @since 2.12
   *
   * @define Coll mutable.TreeMap
   * @define coll mutable tree map
   */
-@SerialVersionUID(3L)
 sealed class TreeMap[K, V] private (tree: RB.Tree[K, V])(implicit val ordering: Ordering[K])
   extends AbstractMap[K, V]
     with SortedMap[K, V]
     with SortedMapOps[K, V, TreeMap, TreeMap[K, V]]
     with StrictOptimizedIterableOps[(K, V), Iterable, TreeMap[K, V]]
-    with Serializable {
+    with StrictOptimizedMapOps[K, V, Map, TreeMap[K, V]]
+    with StrictOptimizedSortedMapOps[K, V, TreeMap, TreeMap[K, V]] {
 
   override def sortedMapFactory = TreeMap
 
@@ -37,19 +34,41 @@ sealed class TreeMap[K, V] private (tree: RB.Tree[K, V])(implicit val ordering: 
     */
   def this()(implicit ord: Ordering[K]) = this(RB.Tree.empty)(ord)
 
-  def iterator: Iterator[(K, V)] = RB.iterator(tree)
+  def iterator: Iterator[(K, V)] = {
+    if (isEmpty) Iterator.empty
+    else RB.iterator(tree)
+  }
 
-  def keysIteratorFrom(start: K): Iterator[K] = RB.keysIterator(tree, Some(start))
+  override def keysIterator: Iterator[K] = {
+    if (isEmpty) Iterator.empty
+    else RB.keysIterator(tree, None)
+  }
 
-  def iteratorFrom(start: K): Iterator[(K, V)] = RB.iterator(tree, Some(start))
+  override def valuesIterator: Iterator[V] = {
+    if (isEmpty) Iterator.empty
+    else RB.valuesIterator(tree, None)
+  }
 
-  override def valuesIteratorFrom(start: K): Iterator[V] = RB.valuesIterator(tree, Some(start))
+  def keysIteratorFrom(start: K): Iterator[K] = {
+    if (isEmpty) Iterator.empty
+    else RB.keysIterator(tree, Some(start))
+  }
+
+  def iteratorFrom(start: K): Iterator[(K, V)] = {
+    if (isEmpty) Iterator.empty
+    else RB.iterator(tree, Some(start))
+  }
+
+  override def valuesIteratorFrom(start: K): Iterator[V] = {
+    if (isEmpty) Iterator.empty
+    else RB.valuesIterator(tree, Some(start))
+  }
 
   def addOne(elem: (K, V)): this.type = { RB.insert(tree, elem._1, elem._2); this }
 
   def subtractOne(elem: K): this.type = { RB.delete(tree, elem); this }
 
-  def clear(): Unit = RB.clear(tree)
+  override def clear(): Unit = RB.clear(tree)
 
   def get(key: K): Option[V] = RB.get(tree, key)
 
@@ -72,7 +91,7 @@ sealed class TreeMap[K, V] private (tree: RB.Tree[K, V])(implicit val ordering: 
   override def foreach[U](f: ((K, V)) => U): Unit = RB.foreach(tree, f)
 
   override def size: Int = RB.size(tree)
-
+  override def knownSize: Int = size
   override def isEmpty: Boolean = RB.isEmpty(tree)
 
   override def contains(key: K): Boolean = RB.contains(tree, key)
@@ -85,7 +104,7 @@ sealed class TreeMap[K, V] private (tree: RB.Tree[K, V])(implicit val ordering: 
 
   override def maxBefore(key: K): Option[(K, V)] = RB.maxBefore(tree, key)
 
-  override def className: String = "TreeMap"
+  override protected[this] def className: String = "TreeMap"
 
 
   /**
@@ -101,7 +120,6 @@ sealed class TreeMap[K, V] private (tree: RB.Tree[K, V])(implicit val ordering: 
     * @param until the upper bound (exclusive) of this projection wrapped in a `Some`, or `None` if there is no upper
     *              bound.
     */
-  @SerialVersionUID(3L)
   private[this] final class TreeMapProjection(from: Option[K], until: Option[K]) extends TreeMap[K, V](tree) {
 
     /**
@@ -136,13 +154,15 @@ sealed class TreeMap[K, V] private (tree: RB.Tree[K, V])(implicit val ordering: 
 
     override def get(key: K) = if (isInsideViewBounds(key)) RB.get(tree, key) else None
 
-    override def iterator = RB.iterator(tree, from, until)
-    override def keysIteratorFrom(start: K) = RB.keysIterator(tree, pickLowerBound(Some(start)), until)
-    override def iteratorFrom(start: K) = RB.iterator(tree, pickLowerBound(Some(start)), until)
-    override def valuesIteratorFrom(start: K) = RB.valuesIterator(tree, pickLowerBound(Some(start)), until)
-
-    override def size = iterator.length
-    override def isEmpty = !iterator.hasNext
+    override def iterator = if (RB.size(tree) == 0) Iterator.empty else RB.iterator(tree, from, until)
+    override def keysIterator: Iterator[K] = if (RB.size(tree) == 0) Iterator.empty else RB.keysIterator(tree, from, until)
+    override def valuesIterator: Iterator[V] = if (RB.size(tree) == 0) Iterator.empty else RB.valuesIterator(tree, from, until)
+    override def keysIteratorFrom(start: K) = if (RB.size(tree) == 0) Iterator.empty else RB.keysIterator(tree, pickLowerBound(Some(start)), until)
+    override def iteratorFrom(start: K) = if (RB.size(tree) == 0) Iterator.empty else RB.iterator(tree, pickLowerBound(Some(start)), until)
+    override def valuesIteratorFrom(start: K) = if (RB.size(tree) == 0) Iterator.empty else RB.valuesIterator(tree, pickLowerBound(Some(start)), until)
+    override def size = if (RB.size(tree) == 0) 0 else iterator.length
+    override def knownSize: Int = if (RB.size(tree) == 0) 0 else -1
+    override def isEmpty = RB.size(tree) == 0 || !iterator.hasNext
     override def contains(key: K) = isInsideViewBounds(key) && RB.contains(tree, key)
 
     override def head = headOption.get
@@ -179,9 +199,10 @@ sealed class TreeMap[K, V] private (tree: RB.Tree[K, V])(implicit val ordering: 
   * @define Coll mutable.TreeMap
   * @define coll mutable tree map
   */
+@SerialVersionUID(3L)
 object TreeMap extends SortedMapFactory[TreeMap] {
 
-  def from[K : Ordering, V](it: collection.IterableOnce[(K, V)]): TreeMap[K, V] =
+  def from[K : Ordering, V](it: IterableOnce[(K, V)]): TreeMap[K, V] =
     Growable.from(empty[K, V], it)
 
   def empty[K : Ordering, V]: TreeMap[K, V] = new TreeMap[K, V]()

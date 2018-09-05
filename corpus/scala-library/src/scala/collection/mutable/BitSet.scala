@@ -2,8 +2,11 @@ package scala
 package collection
 package mutable
 
+import java.io.{ObjectInputStream, ObjectOutputStream}
+
 import scala.collection.immutable.Range
 import BitSetOps.{LogWL, MaxSize}
+import scala.annotation.implicitNotFound
 
 
 /**
@@ -21,7 +24,6 @@ import BitSetOps.{LogWL, MaxSize}
   * @define mayNotTerminateInf
   * @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 class BitSet(protected[collection] final var elems: Array[Long])
   extends AbstractSet[Int]
     with SortedSet[Int]
@@ -29,13 +31,15 @@ class BitSet(protected[collection] final var elems: Array[Long])
     with SortedSetOps[Int, SortedSet, BitSet]
     with collection.BitSetOps[BitSet]
     with StrictOptimizedIterableOps[Int, Set, BitSet]
-    with Serializable {
+    with StrictOptimizedSortedSetOps[Int, SortedSet, BitSet] {
 
   def this(initSize: Int) = this(new Array[Long](math.max((initSize + 63) >> 6, 1)))
 
   def this() = this(0)
 
   def bitSetFactory = BitSet
+
+  override def unsorted: Set[Int] = this
 
   protected[collection] final def nwords: Int = elems.length
 
@@ -83,8 +87,6 @@ class BitSet(protected[collection] final var elems: Array[Long])
       elems = elems1
     }
   }
-
-  def get(elem: Int): Option[Int] = if (contains(elem)) Some(elem) else None
 
   def unconstrained: collection.Set[Int] = this
 
@@ -140,11 +142,26 @@ class BitSet(protected[collection] final var elems: Array[Long])
 
   def toImmutable: immutable.BitSet = immutable.BitSet.fromBitMask(elems)
 
-  override def map(f: Int => Int): BitSet = super[BitSet].map(f)
-  override def map[B : Ordering](f: Int => B): SortedSet[B] = super[SortedSetOps].map(f)
+  override def map(f: Int => Int): BitSet = strictOptimizedMap(newSpecificBuilder, f)
+  override def map[B](f: Int => B)(implicit @implicitNotFound(collection.BitSet.ordMsg) ev: Ordering[B]): SortedSet[B] =
+    super[StrictOptimizedSortedSetOps].map(f)
 
+  override def flatMap(f: Int => IterableOnce[Int]): BitSet = strictOptimizedFlatMap(newSpecificBuilder, f)
+  override def flatMap[B](f: Int => IterableOnce[B])(implicit @implicitNotFound(collection.BitSet.ordMsg) ev: Ordering[B]): SortedSet[B] =
+    super[StrictOptimizedSortedSetOps].flatMap(f)
+
+  override def collect(pf: PartialFunction[Int, Int]): BitSet = strictOptimizedCollect(newSpecificBuilder, pf)
+  override def collect[B](pf: scala.PartialFunction[Int, B])(implicit @implicitNotFound(collection.BitSet.ordMsg) ev: Ordering[B]): SortedSet[B] =
+    super[StrictOptimizedSortedSetOps].collect(pf)
+
+  // necessary for disambiguation
+  override def zip[B](that: IterableOnce[B])(implicit @implicitNotFound(collection.BitSet.zipOrdMsg) ev: Ordering[(Int, B)]): SortedSet[(Int, B)] =
+    super.zip(that)
+
+  override protected[this] def writeReplace(): AnyRef = new BitSet.SerializationProxy(this)
 }
 
+@SerialVersionUID(3L)
 object BitSet extends SpecificIterableFactory[Int, BitSet] {
 
   def fromSpecific(it: scala.collection.IterableOnce[Int]): BitSet = Growable.from(empty, it)
@@ -171,4 +188,14 @@ object BitSet extends SpecificIterableFactory[Int, BitSet] {
     if (len == 0) empty
     else new BitSet(elems)
   }
+
+  @SerialVersionUID(3L)
+  private final class SerializationProxy(coll: BitSet) extends scala.collection.BitSet.SerializationProxy(coll) {
+    protected[this] def readResolve(): Any = BitSet.fromBitMaskNoCopy(elems)
+  }
+
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }

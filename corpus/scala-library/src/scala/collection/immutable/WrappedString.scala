@@ -17,19 +17,19 @@ import mutable.{Builder, StringBuilder}
   *  @define Coll `WrappedString`
   *  @define coll wrapped string
   */
-final class WrappedString(val self: String) extends AbstractSeq[Char] with IndexedSeq[Char]
+final class WrappedString(private val self: String) extends AbstractSeq[Char] with IndexedSeq[Char]
   with IndexedSeqOps[Char, IndexedSeq, WrappedString] {
 
   def apply(i: Int): Char = self.charAt(i)
 
-  override protected def fromSpecificIterable(coll: scala.collection.Iterable[Char]): WrappedString =
+  override protected def fromSpecific(coll: scala.collection.IterableOnce[Char]): WrappedString =
     WrappedString.fromSpecific(coll)
   override protected def newSpecificBuilder: Builder[Char, WrappedString] = WrappedString.newBuilder
 
   override def slice(from: Int, until: Int): WrappedString = {
     val start = if (from < 0) 0 else from
     if (until <= start || start >= self.length)
-      return new WrappedString("")
+      return WrappedString.empty
 
     val end = if (until > length) length else until
     new WrappedString(self.substring(start, end))
@@ -37,12 +37,22 @@ final class WrappedString(val self: String) extends AbstractSeq[Char] with Index
   override def length = self.length
   override def toString = self
   override def view: StringView = new StringView(self)
+
+  override protected[this] def className = "WrappedString"
+
+  override def equals(other: Any): Boolean = other match {
+    case that: WrappedString =>
+      this.self == that.self
+    case _ =>
+      super.equals(other)
+  }
 }
 
 /** A companion object for wrapped strings.
   *
   *  @since 2.8
   */
+@SerialVersionUID(3L)
 object WrappedString extends SpecificIterableFactory[Char, WrappedString] {
   def fromSpecific(it: IterableOnce[Char]): WrappedString = {
     val b = newBuilder
@@ -54,4 +64,8 @@ object WrappedString extends SpecificIterableFactory[Char, WrappedString] {
   val empty: WrappedString = new WrappedString("")
   def newBuilder: Builder[Char, WrappedString] =
     new StringBuilder().mapResult(x => new WrappedString(x))
+
+  implicit class UnwrapOp(private val value: WrappedString) extends AnyVal {
+    def unwrap: String = value.self
+  }
 }

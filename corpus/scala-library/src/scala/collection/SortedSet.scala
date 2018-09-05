@@ -1,13 +1,15 @@
 package scala.collection
 
+import scala.annotation.implicitNotFound
 import scala.annotation.unchecked.uncheckedVariance
+import scala.collection.generic.DefaultSerializationProxy
 import scala.language.higherKinds
 
 /** Base type of sorted sets */
 trait SortedSet[A] extends Set[A] with SortedSetOps[A, SortedSet, SortedSet[A]] {
   def unsorted: Set[A] = this
 
-  override protected def fromSpecificIterable(coll: Iterable[A] @uncheckedVariance): SortedIterableCC[A] @uncheckedVariance = sortedIterableFactory.from(coll)
+  override protected def fromSpecific(coll: IterableOnce[A] @uncheckedVariance): SortedIterableCC[A] @uncheckedVariance = sortedIterableFactory.from(coll)
   override protected def newSpecificBuilder: mutable.Builder[A, SortedIterableCC[A]] @uncheckedVariance = sortedIterableFactory.newBuilder[A]
 
   /**
@@ -21,6 +23,10 @@ trait SortedSet[A] extends Set[A] with SortedSetOps[A, SortedSet, SortedSet[A]] 
   def sortedIterableFactory: SortedIterableFactory[SortedIterableCC] = SortedSet
 
   override def empty: SortedIterableCC[A] = sortedIterableFactory.empty
+
+  override protected[this] def writeReplace(): AnyRef = new DefaultSerializationProxy(sortedIterableFactory.evidenceIterableFactory[A], this)
+
+  override protected[this] def stringPrefix: String = "SortedSet"
 }
 
 trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
@@ -28,7 +34,7 @@ trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
      with SortedOps[A, C] {
 
   /**
-    * Type alias to `CC`. It is used to provide a default implementation of the `fromSpecificIterable`
+    * Type alias to `CC`. It is used to provide a default implementation of the `fromSpecific`
     * and `newSpecificBuilder` operations.
     *
     * Due to the `@uncheckedVariance` annotation, usage of this type member can be unsound and is
@@ -37,11 +43,6 @@ trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
   protected type SortedIterableCC[X] = CC[X] @uncheckedVariance
 
   def sortedIterableFactory: SortedIterableFactory[SortedIterableCC]
-
-  /** Similar to `fromSpecificIterable`, but for a (possibly) different type of element.
-    * Note that the return type is now `CC[B]` aka `SortedIterableCC[B]` rather than `IterableCC[B]`.
-    */
-  @`inline` final protected def sortedFromIterable[B: Ordering](it: Iterable[B]): CC[B] = sortedIterableFactory.from(it)
 
   def unsorted: Set[A]
 
@@ -54,6 +55,9 @@ trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
     * @param start The lower-bound (inclusive) of the iterator
     */
   def iteratorFrom(start: A): Iterator[A]
+  
+  @deprecated("Use `iteratorFrom` instead.", "2.13.0")
+  @`inline` def keysIteratorFrom(start: A): Iterator[A] = iteratorFrom(start)
 
   def firstKey: A = head
   def lastKey: A = last
@@ -90,7 +94,8 @@ trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
     *  @return       a new $coll resulting from applying the given function
     *                `f` to each element of this $coll and collecting the results.
     */
-  def map[B : Ordering](f: A => B): CC[B] = sortedFromIterable(new View.Map(toIterable, f))
+  def map[B](f: A => B)(implicit @implicitNotFound(SortedSetOps.ordMsg) ev: Ordering[B]): CC[B] =
+    sortedIterableFactory.from(new View.Map(toIterable, f))
 
   /** Builds a new sorted collection by applying a function to all elements of this $coll
     *  and using the elements of the resulting collections.
@@ -100,7 +105,8 @@ trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
     *  @return       a new $coll resulting from applying the given collection-valued function
     *                `f` to each element of this $coll and concatenating the results.
     */
-  def flatMap[B : Ordering](f: A => IterableOnce[B]): CC[B] = sortedFromIterable(new View.FlatMap(toIterable, f))
+  def flatMap[B](f: A => IterableOnce[B])(implicit @implicitNotFound(SortedSetOps.ordMsg) ev: Ordering[B]): CC[B] =
+    sortedIterableFactory.from(new View.FlatMap(toIterable, f))
 
   /** Returns a $coll formed from this $coll and another iterable collection
     *  by combining corresponding elements in pairs.
@@ -111,8 +117,11 @@ trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
     *  @return        a new $coll containing pairs consisting of corresponding elements of this $coll and `that`.
     *                 The length of the returned collection is the minimum of the lengths of this $coll and `that`.
     */
-  def zip[B](that: Iterable[B])(implicit ev: Ordering[(A @uncheckedVariance, B)]): CC[(A @uncheckedVariance, B)] = // sound bcs of VarianceNote
-    sortedFromIterable(new View.Zip(toIterable, that))
+  def zip[B](that: IterableOnce[B])(implicit @implicitNotFound(SortedSetOps.zipOrdMsg) ev: Ordering[(A @uncheckedVariance, B)]): CC[(A @uncheckedVariance, B)] = // sound bcs of VarianceNote
+    sortedIterableFactory.from(that match {
+      case that: Iterable[B] => new View.Zip(toIterable, that)
+      case _ => iterator.zip(that)
+    })
 
   /** Builds a new sorted collection by applying a partial function to all elements of this $coll
     *  on which the function is defined.
@@ -123,13 +132,13 @@ trait SortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
     *                `pf` to each element on which it is defined and collecting the results.
     *                The order of the elements is preserved.
     */
-  def collect[B: Ordering](pf: scala.PartialFunction[A, B]): CC[B] = flatMap(a =>
-    if (pf.isDefinedAt(a)) new View.Single(pf(a))
-    else View.Empty
-  )
+  def collect[B](pf: scala.PartialFunction[A, B])(implicit @implicitNotFound(SortedSetOps.ordMsg) ev: Ordering[B]): CC[B] =
+    sortedIterableFactory.from(new View.Collect(toIterable, pf))
 }
 
 object SortedSetOps {
+  private[collection] final val ordMsg = "No implicit Ordering[${B}] found to build a SortedSet[${B}]. You may want to upcast to a Set[${A}] first by calling `unsorted`."
+  private[collection] final val zipOrdMsg = "No implicit Ordering[${B}] found to build a SortedSet[(${A}, ${B})]. You may want to upcast to a Set[${A}] first by calling `unsorted`."
 
   /** Specialize `WithFilter` for sorted collections
     *
@@ -152,4 +161,5 @@ object SortedSetOps {
 
 }
 
+@SerialVersionUID(3L)
 object SortedSet extends SortedIterableFactory.Delegate[SortedSet](immutable.SortedSet)

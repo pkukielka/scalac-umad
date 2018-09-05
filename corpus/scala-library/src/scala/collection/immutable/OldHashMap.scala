@@ -1,9 +1,10 @@
 package scala
 package collection.immutable
 
-import collection.{Iterator, MapFactory, StrictOptimizedIterableOps}
-import collection.Hashing.{computeHash, keepBits}
+import java.io.{ObjectInputStream, ObjectOutputStream}
 
+import collection.{Iterator, MapFactory, StrictOptimizedIterableOps, StrictOptimizedMapOps}
+import collection.Hashing.{computeHash, keepBits}
 import scala.annotation.unchecked.{uncheckedVariance => uV}
 import java.lang.{Integer, String, System}
 
@@ -17,36 +18,35 @@ import scala.collection.mutable.{Builder, ImmutableBuilder}
   *  @tparam V      the type of the values associated with the keys.
   *  @author  Martin Odersky
   *  @author  Tiark Rompf
-  *  @version 2.8
   *  @since   2.3
   *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#hash-tries "Scala's Collection Library overview"]]
   *  section on `Hash Tries` for more information.
-  *  @define Coll `immutable.HashMap`
+  *  @define Coll `immutable.OldHashMap`
   *  @define coll immutable hash map
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
-sealed abstract class HashMap[K, +V]
+@deprecated("Use the new CHAMP-based HashMap; OldHashMap is provided for compatibility only", "2.13.0")
+sealed abstract class OldHashMap[K, +V]
   extends AbstractMap[K, V]
-    with MapOps[K, V, HashMap, HashMap[K, V]]
-    with StrictOptimizedIterableOps[(K, V), Iterable, HashMap[K, V]]
-    with Serializable {
+    with MapOps[K, V, OldHashMap, OldHashMap[K, V]]
+    with StrictOptimizedIterableOps[(K, V), Iterable, OldHashMap[K, V]]
+    with StrictOptimizedMapOps[K, V, OldHashMap, OldHashMap[K, V]] {
 
-  import HashMap.{bufferSize, liftMerger, Merger, MergeFunction, nullToEmpty}
+  import OldHashMap.{bufferSize, liftMerger, Merger, MergeFunction, nullToEmpty}
 
-  override def mapFactory: MapFactory[HashMap] = HashMap
+  override def mapFactory: MapFactory[OldHashMap] = OldHashMap
 
-  def remove(key: K): HashMap[K, V] = removed0(key, computeHash(key), 0)
+  def remove(key: K): OldHashMap[K, V] = removed0(key, computeHash(key), 0)
 
-  final def updated[V1 >: V](key: K, value: V1): HashMap[K, V1] =
+  final def updated[V1 >: V](key: K, value: V1): OldHashMap[K, V1] =
     updated0(key, computeHash(key), 0, value, null, null)
 
-  @`inline` override final def +[V1 >: V](kv: (K, V1)): HashMap[K, V1] = updated(kv._1, kv._2)
+  @`inline` override final def +[V1 >: V](kv: (K, V1)): OldHashMap[K, V1] = updated(kv._1, kv._2)
 
   def get(key: K): Option[V] = get0(key, computeHash(key), 0)
 
-  def split: Seq[HashMap[K, V]] = Seq(this)
+  def split: Seq[OldHashMap[K, V]] = Seq(this)
 
   /** Creates a new map which is the merge of this and the argument hash map.
     *
@@ -61,57 +61,58 @@ sealed abstract class HashMap[K, +V]
     *  @param that     the other hash map
     *  @param mergef   the merge function or null if the first key-value pair is to be picked
     */
-  def merged[V1 >: V](that: HashMap[K, V1])(mergef: MergeFunction[K, V1]): HashMap[K, V1] = merge0(that, 0, liftMerger(mergef))
+  def merged[V1 >: V](that: OldHashMap[K, V1])(mergef: MergeFunction[K, V1]): OldHashMap[K, V1] = merge0(that, 0, liftMerger(mergef))
 
-  protected def updated0[V1 >: V](key: K, hash: Int, level: Int, value: V1, kv: (K, V1), merger: Merger[K, V1]): HashMap[K, V1]
+  protected def updated0[V1 >: V](key: K, hash: Int, level: Int, value: V1, kv: (K, V1), merger: Merger[K, V1]): OldHashMap[K, V1]
 
-  protected def removed0(key: K, hash: Int, level: Int): HashMap[K, V]
+  protected def removed0(key: K, hash: Int, level: Int): OldHashMap[K, V]
 
   protected def get0(key: K, hash: Int, level: Int): Option[V]
 
-  protected def merge0[V1 >: V](that: HashMap[K, V1], level: Int, merger: Merger[K, V1]): HashMap[K, V1]
+  protected def merge0[V1 >: V](that: OldHashMap[K, V1], level: Int, merger: Merger[K, V1]): OldHashMap[K, V1]
 
-  protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[HashMap[K, V @uV]], offset0: Int): HashMap[K, V]
+  protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[OldHashMap[K, V @uV]], offset0: Int): OldHashMap[K, V]
 
   protected def contains0(key: K, hash: Int, level: Int): Boolean
 
   override final def contains(key: K): Boolean = contains0(key, computeHash(key), 0)
 
-  override def tail: HashMap[K, V] = this - head._1
+  override def tail: OldHashMap[K, V] = this - head._1
 
-  override def init: HashMap[K, V] = this - last._1
+  override def init: OldHashMap[K, V] = this - last._1
 
-  override def filter(pred: ((K, V)) => Boolean): HashMap[K, V] = {
-    val buffer = new Array[HashMap[K, V]](bufferSize(size))
+  override def filter(pred: ((K, V)) => Boolean): OldHashMap[K, V] = {
+    val buffer = new Array[OldHashMap[K, V]](bufferSize(size))
     nullToEmpty(filter0(pred, negate = false, 0, buffer, 0))
   }
 
-  override def filterNot(pred: ((K, V)) => Boolean): HashMap[K, V] = {
-    val buffer = new Array[HashMap[K, V]](bufferSize(size))
+  override def filterNot(pred: ((K, V)) => Boolean): OldHashMap[K, V] = {
+    val buffer = new Array[OldHashMap[K, V]](bufferSize(size))
     nullToEmpty(filter0(pred, negate = true, 0, buffer, 0))
   }
 
-  override def className: String = "HashMap"
+  override protected[this] def className: String = "OldHashMap"
 
 }
 
 /**
   * $factoryInfo
-  * @define Coll `immutable.HashMap`
+  * @define Coll `immutable.OldHashMap`
   * @define coll immutable hash map
   */
-object HashMap extends MapFactory[HashMap] {
+@SerialVersionUID(3L)
+object OldHashMap extends MapFactory[OldHashMap] {
 
-  def empty[K, V]: HashMap[K, V] = EmptyHashMap.asInstanceOf[HashMap[K, V]]
+  def empty[K, V]: OldHashMap[K, V] = EmptyOldHashMap.asInstanceOf[OldHashMap[K, V]]
 
-  def from[K, V](it: collection.IterableOnce[(K, V)]): HashMap[K, V] =
+  def from[K, V](it: collection.IterableOnce[(K, V)]): OldHashMap[K, V] =
     it match {
-      case hm: HashMap[K, V] => hm
+      case hm: OldHashMap[K, V] => hm
       case _ => (newBuilder[K, V] ++= it).result()
     }
 
-  def newBuilder[K, V]: Builder[(K, V), HashMap[K, V]] =
-    new ImmutableBuilder[(K, V), HashMap[K, V]](empty) {
+  def newBuilder[K, V]: Builder[(K, V), OldHashMap[K, V]] =
+    new ImmutableBuilder[(K, V), OldHashMap[K, V]](empty) {
       def addOne(elem: (K, V)): this.type = { elems = elems + elem; this }
     }
 
@@ -136,13 +137,13 @@ object HashMap extends MapFactory[HashMap] {
     }
   }
 
-  // utility method to create a HashTrieMap from two leaf HashMaps (HashMap1 or HashMapCollision1) with non-colliding hash code)
-  private def makeHashTrieMap[A, B](hash0: Int, elem0: HashMap[A, B], hash1: Int, elem1:HashMap[A, B], level: Int, size: Int) : HashTrieMap[A, B] = {
+  // utility method to create a HashTrieMap from two leaf OldHashMaps (OldHashMap1 or OldHashMapCollision1) with non-colliding hash code)
+  private def makeHashTrieMap[A, B](hash0: Int, elem0: OldHashMap[A, B], hash1: Int, elem1:OldHashMap[A, B], level: Int, size: Int) : HashTrieMap[A, B] = {
     val index0 = (hash0 >>> level) & 0x1f
     val index1 = (hash1 >>> level) & 0x1f
     if(index0 != index1) {
       val bitmap = (1 << index0) | (1 << index1)
-      val elems = new Array[HashMap[A,B]](2)
+      val elems = new Array[OldHashMap[A,B]](2)
       if(index0 < index1) {
         elems(0) = elem0
         elems(1) = elem1
@@ -152,7 +153,7 @@ object HashMap extends MapFactory[HashMap] {
       }
       new HashTrieMap[A, B](bitmap, elems, size)
     } else {
-      val elems = new Array[HashMap[A,B]](1)
+      val elems = new Array[OldHashMap[A,B]](1)
       val bitmap = (1 << index0)
       elems(0) = makeHashTrieMap(hash0, elem0, hash1, elem1, level + 5, size)
       new HashTrieMap[A, B](bitmap, elems, size)
@@ -170,23 +171,24 @@ object HashMap extends MapFactory[HashMap] {
     * In many internal operations the empty map is represented as null for performance reasons. This method converts
     * null to the empty map for use in public methods
     */
-  @`inline` private def nullToEmpty[A, B](m: HashMap[A, B]): HashMap[A, B] = if (m eq null) empty[A, B] else m
+  @`inline` private def nullToEmpty[A, B](m: OldHashMap[A, B]): OldHashMap[A, B] = if (m eq null) empty[A, B] else m
 
-  @SerialVersionUID(3L)
-  private object EmptyHashMap extends HashMap[Any, Nothing] {
+  private object EmptyOldHashMap extends OldHashMap[Any, Nothing] {
 
-    protected def updated0[V1 >: Nothing](key: Any, hash: Int, level: Int, value: V1, kv: (Any, V1), merger: Merger[Any, V1]): HashMap[Any, V1] =
-      new HashMap.HashMap1(key, hash, value, kv)
+    override def isEmpty: Boolean = true
+    override def knownSize: Int = 0
+    protected def updated0[V1 >: Nothing](key: Any, hash: Int, level: Int, value: V1, kv: (Any, V1), merger: Merger[Any, V1]): OldHashMap[Any, V1] =
+      new OldHashMap.OldHashMap1(key, hash, value, kv)
 
-    protected def removed0(key: Any, hash: Int, level: Int): HashMap[Any, Nothing] = this
+    protected def removed0(key: Any, hash: Int, level: Int): OldHashMap[Any, Nothing] = this
 
     protected def get0(key: Any, hash: Int, level: Int): Option[Nothing] = None
 
-    protected def filter0(p: ((Any, Nothing)) => Boolean, negate: Boolean, level: Int, buffer: Array[HashMap[Any, Nothing]], offset0: Int): HashMap[Any, Nothing] = null
+    protected def filter0(p: ((Any, Nothing)) => Boolean, negate: Boolean, level: Int, buffer: Array[OldHashMap[Any, Nothing]], offset0: Int): OldHashMap[Any, Nothing] = null
 
     protected def contains0(key: Any, hash: Int, level: Int): Boolean = false
 
-    protected def merge0[V1 >: Nothing](that: HashMap[Any, V1], level: Int, merger: Merger[Any, V1]): HashMap[Any, V1] = that
+    protected def merge0[V1 >: Nothing](that: OldHashMap[Any, V1], level: Int, merger: Merger[Any, V1]): OldHashMap[Any, V1] = that
 
     def iterator: Iterator[(Any, Nothing)] = Iterator.empty
 
@@ -196,24 +198,23 @@ object HashMap extends MapFactory[HashMap] {
 
     override def headOption: None.type = None
 
-    override def tail: HashMap[Any, Nothing] = throw new NoSuchElementException("Empty Map")
+    override def tail: OldHashMap[Any, Nothing] = throw new NoSuchElementException("Empty Map")
 
     override def last: (Any, Nothing) = throw new NoSuchElementException("Empty Map")
 
-    override def init: HashMap[Any, Nothing] = throw new NoSuchElementException("Empty Map")
+    override def init: OldHashMap[Any, Nothing] = throw new NoSuchElementException("Empty Map")
 
   }
 
-  @SerialVersionUID(3L)
-  final class HashMap1[K, +V](private[collection] val key: K, private[collection] val hash: Int, private[collection] val value: V, private[collection] var kv: (K, V@uV)) extends HashMap[K, V] {
-
+  final class OldHashMap1[K, +V](private[collection] val key: K, private[collection] val hash: Int, private[collection] val value: V, private[collection] var kv: (K, V@uV)) extends OldHashMap[K, V] {
+    override def isEmpty: Boolean = false
     def iterator: Iterator[(K, V)] = Iterator.single(ensurePair)
 
     def get0(key: K, hash: Int, level: Int): Option[V] =
       if (hash == this.hash && key == this.key) Some(value) else None
 
     override def size = 1
-
+    override def knownSize: Int = 1
     private[collection] def getKey = key
     private[collection] def getHash = hash
     private[collection] def computeHashFor(k: K) = computeHash(k)
@@ -221,99 +222,98 @@ object HashMap extends MapFactory[HashMap] {
     protected def contains0(key: K, hash: Int, level: Int): Boolean =
       hash == this.hash && key == this.key
 
-    protected def updated0[V1 >: V](key: K, hash: Int, level: Int, value: V1, kv: (K, V1), merger: Merger[K, V1]): HashMap[K, V1] =
+    protected def updated0[V1 >: V](key: K, hash: Int, level: Int, value: V1, kv: (K, V1), merger: Merger[K, V1]): OldHashMap[K, V1] =
       if (hash == this.hash && key == this.key ) {
         if (merger eq null) {
           if (this.value.asInstanceOf[AnyRef] eq value.asInstanceOf[AnyRef]) this
-          else new HashMap1(key, hash, value, kv)
+          else new OldHashMap1(key, hash, value, kv)
         } else {
           val nkv = merger(this.ensurePair, if(kv != null) kv else (key, value))
-          new HashMap1(nkv._1, hash, nkv._2, nkv)
+          new OldHashMap1(nkv._1, hash, nkv._2, nkv)
         }
       } else {
         if (hash != this.hash) {
           // they have different hashes, but may collide at this level - find a level at which they don't
-          val that = new HashMap1[K, V1](key, hash, value, kv)
+          val that = new OldHashMap1[K, V1](key, hash, value, kv)
           makeHashTrieMap[K,V1](this.hash, this, hash, that, level, 2)
         } else {
           // 32-bit hash collision (rare, but not impossible)
-          new HashMapCollision1(hash, ListMap.empty.updated(this.key,this.value).updated(key,value))
+          new OldHashMapCollision1(hash, ListMap.empty.updated(this.key,this.value).updated(key,value))
         }
       }
 
-    protected def removed0(key: K, hash: Int, level: Int): HashMap[K, V] =
-      if (hash == this.hash && key == this.key) HashMap.empty[K,V] else this
+    protected def removed0(key: K, hash: Int, level: Int): OldHashMap[K, V] =
+      if (hash == this.hash && key == this.key) OldHashMap.empty[K,V] else this
 
-    protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[HashMap[K, V @uV]], offset0: Int): HashMap[K, V] =
+    protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[OldHashMap[K, V @uV]], offset0: Int): OldHashMap[K, V] =
       if (negate ^ p(ensurePair)) this else null
 
     override def foreach[U](f: ((K, V)) => U): Unit = f(ensurePair)
 
     // this method may be called multiple times in a multithreaded environment, but that's ok
-    private[HashMap] def ensurePair: (K, V) = if (kv ne null) kv else { kv = (key, value); kv }
+    private[OldHashMap] def ensurePair: (K, V) = if (kv ne null) kv else { kv = (key, value); kv }
 
-    protected def merge0[V1 >: V](that: HashMap[K, V1], level: Int, merger: Merger[K, V1]): HashMap[K, V1] =
+    protected def merge0[V1 >: V](that: OldHashMap[K, V1], level: Int, merger: Merger[K, V1]): OldHashMap[K, V1] =
       that.updated0(key, hash, level, value, kv, merger.invert)
 
   }
 
-  @SerialVersionUID(3L)
-  private[collection] class HashMapCollision1[K, +V](private[collection] val hash: Int, val kvs: ListMap[K, V @uV])
-    extends HashMap[K, V @uV] {
+  private[collection] class OldHashMapCollision1[K, +V](private[collection] val hash: Int, val kvs: ListMap[K, V @uV])
+    extends OldHashMap[K, V @uV] {
     // assert(kvs.size > 1)
 
     override def size: Int = kvs.size
-
+    override def isEmpty: Boolean = false
     protected def get0(key: K, hash: Int, level: Int): Option[V] =
       if (hash == this.hash) kvs.get(key) else None
 
     protected def contains0(key: K, hash: Int, level: Int): Boolean =
       hash == this.hash && kvs.contains(key)
 
-    protected override def updated0[B1 >: V](key: K, hash: Int, level: Int, value: B1, kv: (K, B1), merger: Merger[K, B1]): HashMap[K, B1] =
+    protected override def updated0[B1 >: V](key: K, hash: Int, level: Int, value: B1, kv: (K, B1), merger: Merger[K, B1]): OldHashMap[K, B1] =
       if (hash == this.hash) {
-        if ((merger eq null) || !kvs.contains(key)) new HashMapCollision1(hash, kvs.updated(key, value))
-        else new HashMapCollision1(hash, kvs + merger((key, kvs(key)), kv))
+        if ((merger eq null) || !kvs.contains(key)) new OldHashMapCollision1(hash, kvs.updated(key, value))
+        else new OldHashMapCollision1(hash, kvs + merger((key, kvs(key)), kv))
       } else {
-        val that = new HashMap1(key, hash, value, kv)
+        val that = new OldHashMap1(key, hash, value, kv)
         makeHashTrieMap(this.hash, this, hash, that, level, size + 1)
       }
 
-    override def removed0(key: K, hash: Int, level: Int): HashMap[K, V] =
+    override def removed0(key: K, hash: Int, level: Int): OldHashMap[K, V] =
       if (hash == this.hash) {
         val kvs1 = kvs - key
         kvs1.size match {
           case 0 =>
-            HashMap.empty[K,V]
+            OldHashMap.empty[K,V]
           case 1 =>
             val kv = kvs1.head
-            new HashMap1(kv._1,hash,kv._2,kv)
+            new OldHashMap1(kv._1,hash,kv._2,kv)
           case x if x == kvs.size =>
             this
           case _ =>
-            new HashMapCollision1(hash, kvs1)
+            new OldHashMapCollision1(hash, kvs1)
         }
       } else this
 
-    override protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[HashMap[K, V @uV]], offset0: Int): HashMap[K, V] = {
+    override protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[OldHashMap[K, V @uV]], offset0: Int): OldHashMap[K, V] = {
       val kvs1 = if (negate) kvs.filterNot(p) else kvs.filter(p)
       kvs1.size match {
         case 0 =>
           null
         case 1 =>
           val kv@(k,v) = kvs1.head
-          new HashMap1(k, hash, v, kv)
+          new OldHashMap1(k, hash, v, kv)
         case x if x == kvs.size =>
           this
         case _ =>
-          new HashMapCollision1(hash, kvs1)
+          new OldHashMapCollision1(hash, kvs1)
       }
     }
 
-    protected def merge0[V1 >: V](that: HashMap[K, V1], level: Int, merger: Merger[K, V1]): HashMap[K, V1] = {
+    protected def merge0[V1 >: V](that: OldHashMap[K, V1], level: Int, merger: Merger[K, V1]): OldHashMap[K, V1] = {
       // this can be made more efficient by passing the entire ListMap at once
       var m = that
-      for (p <- kvs) m = m.updated0(p._1, this.hash, level, p._2, p, merger)
+      for (p <- kvs) m = m.updated0(p._1, this.hash, level, p._2, p, merger.invert)
       m
     }
 
@@ -321,26 +321,26 @@ object HashMap extends MapFactory[HashMap] {
 
     override def foreach[U](f: ((K, V)) => U): Unit = kvs.foreach(f)
 
-    override def split: Seq[HashMap[K, V]] = {
+    override def split: Seq[OldHashMap[K, V]] = {
       val (x, y) = kvs.splitAt(kvs.size / 2)
-      def newhm(lm: ListMap[K, V @uV]) = new HashMapCollision1(hash, lm)
+      def newhm(lm: ListMap[K, V @uV]) = new OldHashMapCollision1(hash, lm)
       List(newhm(x), newhm(y))
     }
 
   }
 
-  @SerialVersionUID(3L)
   final class HashTrieMap[K, +V](
     private[collection] val bitmap: Int,
-    private[collection] val elems: Array[HashMap[K, V @uV]],
+    private[collection] val elems: Array[OldHashMap[K, V @uV]],
     private[collection] val size0: Int
-  ) extends HashMap[K, V @uV] {
+  ) extends OldHashMap[K, V @uV] {
 
     // assert(Integer.bitCount(bitmap) == elems.length)
     // assert(elems.length > 1 || (elems.length == 1 && elems(0).isInstanceOf[HashTrieMap[_,_]]))
 
     override def size: Int = size0
-
+    override def isEmpty: Boolean = false
+    override def knownSize: Int = size
     protected def get0(key: K, hash: Int, level: Int): Option[V] = {
       // Note: this code is duplicated with `contains0`
       val index = (hash >>> level) & 0x1f
@@ -373,7 +373,7 @@ object HashMap extends MapFactory[HashMap] {
       }
     }
 
-    protected def updated0[V1 >: V](key: K, hash: Int, level: Int, value: V1, kv: (K, V1), merger: Merger[K, V1]): HashMap[K, V1] = {
+    protected def updated0[V1 >: V](key: K, hash: Int, level: Int, value: V1, kv: (K, V1), merger: Merger[K, V1]): OldHashMap[K, V1] = {
       val index = (hash >>> level) & 0x1f
       val mask = (1 << index)
       val offset = Integer.bitCount(bitmap & (mask - 1))
@@ -381,21 +381,21 @@ object HashMap extends MapFactory[HashMap] {
         val sub = elems(offset)
         val subNew = sub.updated0(key, hash, level + 5, value, kv, merger)
         if(subNew eq sub) this else {
-          val elemsNew = new Array[HashMap[K,V1]](elems.length)
+          val elemsNew = new Array[OldHashMap[K,V1]](elems.length)
           Array.copy(elems, 0, elemsNew, 0, elems.length)
           elemsNew(offset) = subNew
           new HashTrieMap(bitmap, elemsNew, size + (subNew.size - sub.size))
         }
       } else {
-        val elemsNew = new Array[HashMap[K,V1]](elems.length + 1)
+        val elemsNew = new Array[OldHashMap[K,V1]](elems.length + 1)
         Array.copy(elems, 0, elemsNew, 0, offset)
-        elemsNew(offset) = new HashMap1(key, hash, value, kv)
+        elemsNew(offset) = new OldHashMap1(key, hash, value, kv)
         Array.copy(elems, offset, elemsNew, offset + 1, elems.length - offset)
         new HashTrieMap(bitmap | mask, elemsNew, size + 1)
       }
     }
 
-    override def removed0(key: K, hash: Int, level: Int): HashMap[K, V] = {
+    override def removed0(key: K, hash: Int, level: Int): OldHashMap[K, V] = {
       val index = (hash >>> level) & 0x1f
       val mask = (1 << index)
       val offset = Integer.bitCount(bitmap & (mask - 1))
@@ -406,7 +406,7 @@ object HashMap extends MapFactory[HashMap] {
         else if (subNew.isEmpty) {
           val bitmapNew = bitmap ^ mask
           if (bitmapNew != 0) {
-            val elemsNew = new Array[HashMap[K,V]](elems.length - 1)
+            val elemsNew = new Array[OldHashMap[K,V]](elems.length - 1)
             Array.copy(elems, 0, elemsNew, 0, offset)
             Array.copy(elems, offset + 1, elemsNew, offset, elems.length - offset - 1)
             val sizeNew = size - sub.size
@@ -417,7 +417,7 @@ object HashMap extends MapFactory[HashMap] {
             else
               new HashTrieMap(bitmapNew, elemsNew, sizeNew)
           } else
-            HashMap.empty[K,V]
+            OldHashMap.empty[K,V]
         } else if(elems.length == 1 && !subNew.isInstanceOf[HashTrieMap[_,_]]) {
           subNew
         } else {
@@ -431,7 +431,7 @@ object HashMap extends MapFactory[HashMap] {
       }
     }
 
-    protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[HashMap[K, V @uV]], offset0: Int): HashMap[K, V] = {
+    protected def filter0(p: ((K, V)) => Boolean, negate: Boolean, level: Int, buffer: Array[OldHashMap[K, V @uV]], offset0: Int): OldHashMap[K, V] = {
       // current offset
       var offset = offset0
       // result size
@@ -464,7 +464,7 @@ object HashMap extends MapFactory[HashMap] {
       } else {
         // we have to return a HashTrieMap
         val length = offset - offset0
-        val elems1 = new Array[HashMap[K, V]](length)
+        val elems1 = new Array[OldHashMap[K, V]](length)
         System.arraycopy(buffer, offset0, elems1, 0, length)
         val bitmap1 = if (length == elems.length) {
           // we can reuse the original bitmap
@@ -478,7 +478,7 @@ object HashMap extends MapFactory[HashMap] {
     }
 
     override def iterator: Iterator[(K, V)] = new TrieIterator[(K, V)](elems.asInstanceOf[Array[Iterable[(K, V)]]]) {
-      final override def getElem(cc: AnyRef): (K, V) = cc.asInstanceOf[HashMap1[K, V]].ensurePair
+      final override def getElem(cc: AnyRef): (K, V) = cc.asInstanceOf[OldHashMap1[K, V]].ensurePair
     }
 
     override def foreach[U](f: ((K, V)) => U): Unit = {
@@ -501,7 +501,7 @@ object HashMap extends MapFactory[HashMap] {
       i
     }
 
-    override def split: Seq[HashMap[K, V]] = if (size == 1) Seq(this) else {
+    override def split: Seq[OldHashMap[K, V]] = if (size == 1) Seq(this) else {
       val nodesize = Integer.bitCount(bitmap)
       if (nodesize > 1) {
         val splitpoint = nodesize / 2
@@ -517,8 +517,8 @@ object HashMap extends MapFactory[HashMap] {
       } else elems(0).split
     }
 
-    protected def merge0[V1 >: V](that: HashMap[K, V1], level: Int, merger: Merger[K, V1]): HashMap[K, V1] = that match {
-      case hm: HashMap1[_, _] =>
+    protected def merge0[V1 >: V](that: OldHashMap[K, V1], level: Int, merger: Merger[K, V1]): OldHashMap[K, V1] = that match {
+      case hm: OldHashMap1[_, _] =>
         this.updated0(hm.key, hm.hash, level, hm.value.asInstanceOf[V1], hm.kv, merger)
       case hm: HashTrieMap[_, _] =>
         val that = hm.asInstanceOf[HashTrieMap[K, V1]]
@@ -531,7 +531,7 @@ object HashMap extends MapFactory[HashMap] {
         val subcount = Integer.bitCount(thisbm | thatbm)
 
         // construct a new array of appropriate size
-        val merged = new Array[HashMap[K, V1]](subcount)
+        val merged = new Array[OldHashMap[K, V1]](subcount)
 
         // run through both bitmaps and add elements to it
         var i = 0
@@ -571,9 +571,13 @@ object HashMap extends MapFactory[HashMap] {
         }
 
         new HashTrieMap[K, V1](this.bitmap | that.bitmap, merged, totalelems)
-      case hm: HashMapCollision1[_, _] => that.merge0(this, level, merger.invert)
-      case hm: HashMap[_, _] => this
+      case hm: OldHashMapCollision1[_, _] => that.merge0(this, level, merger.invert)
+      case hm: OldHashMap[_, _] => this
     }
   }
 
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }

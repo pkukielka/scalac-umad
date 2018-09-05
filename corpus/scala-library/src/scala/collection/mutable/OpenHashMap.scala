@@ -18,6 +18,7 @@ import java.util.ConcurrentModificationException
   *  @since 2.7
   */
 @deprecated("Use HashMap or one of the specialized versions (LongMap, AnyRefMap) instead of OpenHashMap", "2.13.0")
+@SerialVersionUID(3L)
 object OpenHashMap extends MapFactory[OpenHashMap] {
 
   def empty[K, V] = new OpenHashMap[K, V]
@@ -73,7 +74,7 @@ class OpenHashMap[Key, Value](initialSize : Int)
 
   private[this] val actualInitialSize = HashTable.nextPositivePowerOfTwo(initialSize)
 
-  private var mask = actualInitialSize - 1
+  private[this] var mask = actualInitialSize - 1
 
   /** The hash table.
     *
@@ -82,15 +83,16 @@ class OpenHashMap[Key, Value](initialSize : Int)
     */
   private[this] var table = new Array[Entry](actualInitialSize)
 
-  private var _size = 0
-  private var deleted = 0
+  private[this] var _size = 0
+  private[this] var deleted = 0
 
   // Used for tracking inserts so that iterators can determine if concurrent modification has occurred.
   private[this] var modCount = 0
 
   override def size = _size
+  override def knownSize: Int = size
   private[this] def size_=(s : Int): Unit = _size = s
-
+  override def isEmpty: Boolean = _size == 0
   /** Returns a mangled hash code of the provided key. */
   protected def hashOf(key: Key) = {
     var h = key.##
@@ -141,6 +143,7 @@ class OpenHashMap[Key, Value](initialSize : Int)
     if (firstDeletedIndex == -1) index else firstDeletedIndex
   }
 
+  // TODO refactor `put` to extract `findOrAddEntry` and implement this in terms of that to avoid Some boxing.
   override def update(key: Key, value: Value): Unit = put(key, value)
 
   @deprecatedOverriding("addOne should not be overridden in order to maintain consistency with put.", "2.11.0")
@@ -213,16 +216,25 @@ class OpenHashMap[Key, Value](initialSize : Int)
     None
   }
 
-  def clear(): Unit = keysIterator.foreach(-=)
-
   /** An iterator over the elements of this map. Use of this iterator follows
     *  the same contract for concurrent modification as the foreach method.
     *
     *  @return   the iterator
     */
-  def iterator: Iterator[(Key, Value)] = new AbstractIterator[(Key, Value)] {
-    var index = 0
-    val initialModCount = modCount
+  def iterator: Iterator[(Key, Value)] = new OpenHashMapIterator[(Key, Value)] {
+    override protected def nextResult(node: Entry): (Key, Value) = (node.key, node.value.get)
+  }
+
+  override def keysIterator: Iterator[Key] = new OpenHashMapIterator[Key] {
+    override protected def nextResult(node: Entry): Key = node.key
+  }
+  override def valuesIterator: Iterator[Value] = new OpenHashMapIterator[Value] {
+    override protected def nextResult(node: Entry): Value = node.value.get
+  }
+
+  private abstract class OpenHashMapIterator[A] extends AbstractIterator[A] {
+    private[this] var index = 0
+    private[this] val initialModCount = modCount
 
     private[this] def advance(): Unit = {
       if (initialModCount != modCount) throw new ConcurrentModificationException
@@ -235,8 +247,9 @@ class OpenHashMap[Key, Value](initialSize : Int)
       advance()
       val result = table(index)
       index += 1
-      (result.key, result.value.get)
+      nextResult(result)
     }
+    protected def nextResult(node: Entry): A
   }
 
   override def clone() = {
@@ -267,15 +280,15 @@ class OpenHashMap[Key, Value](initialSize : Int)
     table.foreach(entry => if (entry != null && entry.value != None) f(entry))
   }
 
-  def transform(f : (Key, Value) => Value): this.type = {
+  override def mapValuesInPlace(f : (Key, Value) => Value): this.type = {
     foreachUndeletedEntry(entry => entry.value = Some(f(entry.key, entry.value.get)))
     this
   }
 
-  override def filterInPlace(f : ((Key, Value)) => Boolean): this.type = {
+  override def filterInPlace(f : (Key, Value) => Boolean): this.type = {
     foreachUndeletedEntry(entry => if (!f(entry.key, entry.value.get)) deleteSlot(entry))
     this
   }
 
-  override def className = "OpenHashMap"
+  override protected[this] def stringPrefix = "OpenHashMap"
 }

@@ -10,10 +10,10 @@ package scala
 package collection
 package immutable
 
-import collection.{Iterator, MapFactory}
+import java.io.{ObjectInputStream, ObjectOutputStream}
 
+import collection.{Iterator, MapFactory}
 import scala.annotation.tailrec
-import java.lang.Integer
 
 import scala.collection.mutable.{Builder, ImmutableBuilder}
 
@@ -34,19 +34,18 @@ import scala.collection.mutable.{Builder, ImmutableBuilder}
   *
   * @author Matthias Zenger
   * @author Martin Odersky
-  * @version 2.0, 01/01/2007
   * @since 1
   * @define Coll ListMap
   * @define coll list map
   * @define mayNotTerminateInf
   * @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 sealed class ListMap[K, +V]
   extends AbstractMap[K, V]
+    with SeqMap[K, V]
     with MapOps[K, V, ListMap, ListMap[K, V]]
     with StrictOptimizedIterableOps[(K, V), Iterable, ListMap[K, V]]
-    with Serializable {
+    with StrictOptimizedMapOps[K, V, ListMap, ListMap[K, V]] {
 
   override def mapFactory: MapFactory[ListMap] = ListMap
 
@@ -54,6 +53,7 @@ sealed class ListMap[K, +V]
 
   override def isEmpty: Boolean = true
 
+  override def knownSize: Int = 0
   def get(key: K): Option[V] = None
 
   def updated[B1 >: V](key: K, value: B1): ListMap[K, B1] = new Node[B1](key, value)
@@ -74,14 +74,13 @@ sealed class ListMap[K, +V]
   protected def value: V = throw new NoSuchElementException("value of empty map")
   protected def next: ListMap[K, V] = throw new NoSuchElementException("next of empty map")
 
-  override def className = "ListMap"
+  override protected[this] def className = "ListMap"
 
   /**
     * Represents an entry in the `ListMap`.
     */
-  @SerialVersionUID(3L)
   protected class Node[V1 >: V](override protected val key: K,
-                                override protected val value: V1) extends ListMap[K, V1] with Serializable {
+                                override protected val value: V1) extends ListMap[K, V1] {
 
     override def size: Int = sizeInternal(this, 0)
 
@@ -90,7 +89,7 @@ sealed class ListMap[K, +V]
       else sizeInternal(cur.next, acc + 1)
 
     override def isEmpty: Boolean = false
-
+    override def knownSize: Int = -1
     @throws[NoSuchElementException]
     override def apply(k: K): V1 = applyInternal(this, k)
 
@@ -145,11 +144,11 @@ sealed class ListMap[K, +V]
   * @define Coll ListMap
   * @define coll list map
   */
+@SerialVersionUID(3L)
 object ListMap extends MapFactory[ListMap] {
 
   def empty[K, V]: ListMap[K, V] = EmptyListMap.asInstanceOf[ListMap[K, V]]
 
-  @SerialVersionUID(3L)
   private object EmptyListMap extends ListMap[Any, Nothing]
 
   def from[K, V](it: collection.IterableOnce[(K, V)]): ListMap[K, V] =
@@ -163,5 +162,8 @@ object ListMap extends MapFactory[ListMap] {
       def addOne(elem: (K, V)): this.type = { elems = elems + elem; this }
     }
 
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }
-

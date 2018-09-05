@@ -2,10 +2,8 @@ package scala
 package collection
 
 import scala.collection.immutable.NumericRange
-
-import scala.language.{ higherKinds, implicitConversions }
+import scala.language.{higherKinds, implicitConversions}
 import scala.collection.mutable.Builder
-
 import scala.annotation.unchecked.uncheckedVariance
 import scala.reflect.ClassTag
 
@@ -35,26 +33,28 @@ trait Factory[-A, +C] extends Any {
 
 object Factory {
 
-  implicit val stringFactory: Factory[Char, String] =
-    new Factory[Char, String] {
-      def fromSpecific(it: IterableOnce[Char]): String = {
-        val b = new mutable.StringBuilder(scala.math.max(0, it.knownSize))
-        b ++= it
-        b.result()
-      }
-      def newBuilder: Builder[Char, String] = new mutable.StringBuilder()
+  implicit val stringFactory: Factory[Char, String] = new StringFactory
+  @SerialVersionUID(3L)
+  private class StringFactory extends Factory[Char, String] with Serializable {
+    def fromSpecific(it: IterableOnce[Char]): String = {
+      val b = new mutable.StringBuilder(scala.math.max(0, it.knownSize))
+      b ++= it
+      b.result()
     }
+    def newBuilder: Builder[Char, String] = new mutable.StringBuilder()
+  }
 
-  implicit def arrayFactory[A: ClassTag]: Factory[A, Array[A]] =
-    new Factory[A, Array[A]] {
-      def fromSpecific(it: IterableOnce[A]): Array[A] = {
-        val b = newBuilder
-        b.sizeHint(scala.math.max(0, it.knownSize))
-        b ++= it
-        b.result()
-      }
-      def newBuilder: Builder[A, Array[A]] = mutable.ArrayBuilder.make[A]
+  implicit def arrayFactory[A: ClassTag]: Factory[A, Array[A]] = new ArrayFactory[A]
+  @SerialVersionUID(3L)
+  private class ArrayFactory[A: ClassTag] extends Factory[A, Array[A]] with Serializable {
+    def fromSpecific(it: IterableOnce[A]): Array[A] = {
+      val b = newBuilder
+      b.sizeHint(scala.math.max(0, it.knownSize))
+      b ++= it
+      b.result()
     }
+    def newBuilder: Builder[A, Array[A]] = mutable.ArrayBuilder.make[A]
+  }
 
 }
 
@@ -65,12 +65,12 @@ object Factory {
   * @define factoryInfo
   *   This object provides a set of operations to create $Coll values.
   *   @author Martin Odersky
-  *   @version 2.8
+  *   @since 2.13
   *
   * @define coll collection
   * @define Coll `Iterable`
   */
-trait IterableFactory[+CC[_]] {
+trait IterableFactory[+CC[_]] extends Serializable {
 
   /** Creates a target $coll from an existing source collection
     *
@@ -90,7 +90,7 @@ trait IterableFactory[+CC[_]] {
     * @param elems  the elements of the created $coll
     * @return a new $coll with elements `elems`
     */
-  def apply[A](elems: A*): CC[A] = from(new View.Elems(elems: _*))
+  def apply[A](elems: A*): CC[A] = from(elems)
 
   /** Produces a $coll containing repeated applications of a function to a start value.
     *
@@ -100,6 +100,18 @@ trait IterableFactory[+CC[_]] {
     *  @return      a $coll with `len` values in the sequence `start, f(start), f(f(start)), ...`
     */
   def iterate[A](start: A, len: Int)(f: A => A): CC[A] = from(new View.Iterate(start, len)(f))
+
+  /** Produces a $coll that uses a function `f` to produce elements of type `A`
+    * and update an internal state of type `S`.
+    *
+    * @param init State initial value
+    * @param f    Computes the next element (or returns `None` to signal
+    *             the end of the collection)
+    * @tparam A   Type of the elements
+    * @tparam S   Type of the internal state
+    * @return a $coll that produces elements using `f` until `f` returns `None`
+    */
+  def unfold[A, S](init: S)(f: S => Option[(A, S)]): CC[A] = from(new View.Unfold(init)(f))
 
   /** Produces a $coll containing a sequence of increasing of integers.
     *
@@ -141,7 +153,7 @@ trait IterableFactory[+CC[_]] {
   /** Produces a three-dimensional $coll containing the results of some element computation a number of times.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   elem the element computation
     *  @return  A $coll that contains the results of `n1 x n2 x n3` evaluations of `elem`.
     */
@@ -150,7 +162,7 @@ trait IterableFactory[+CC[_]] {
   /** Produces a four-dimensional $coll containing the results of some element computation a number of times.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   elem the element computation
     *  @return  A $coll that contains the results of `n1 x n2 x n3 x n4` evaluations of `elem`.
@@ -161,7 +173,7 @@ trait IterableFactory[+CC[_]] {
   /** Produces a five-dimensional $coll containing the results of some element computation a number of times.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   n5  the number of elements in the 5th dimension
     *  @param   elem the element computation
@@ -190,7 +202,7 @@ trait IterableFactory[+CC[_]] {
   /** Produces a three-dimensional $coll containing values of a given function over ranges of integer values starting from 0.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   f   The function computing element values
     *  @return A $coll consisting of elements `f(i1, i2, i3)`
     *          for `0 <= i1 < n1`, `0 <= i2 < n2`, and `0 <= i3 < n3`.
@@ -201,7 +213,7 @@ trait IterableFactory[+CC[_]] {
   /** Produces a four-dimensional $coll containing values of a given function over ranges of integer values starting from 0.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   f   The function computing element values
     *  @return A $coll consisting of elements `f(i1, i2, i3, i4)`
@@ -213,7 +225,7 @@ trait IterableFactory[+CC[_]] {
   /** Produces a five-dimensional $coll containing values of a given function over ranges of integer values starting from 0.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   n5  the number of elements in the 5th dimension
     *  @param   f   The function computing element values
@@ -223,8 +235,16 @@ trait IterableFactory[+CC[_]] {
   def tabulate[A](n1: Int, n2: Int, n3: Int, n4: Int, n5: Int)(f: (Int, Int, Int, Int, Int) => A): CC[CC[CC[CC[CC[A]]]] @uncheckedVariance] =
     tabulate(n1)(i1 => tabulate(n2, n3, n4, n5)(f(i1, _, _, _, _)))
 
-  implicit def iterableFactory[A]: Factory[A, CC[A]] = IterableFactory.toFactory(this)
+  /** Concatenates all argument collections into a single $coll.
+   *
+   *  @param xss the collections that are to be concatenated.
+   *  @return the concatenation of all the collections.
+   */
+  def concat[A](xss: Iterable[A]*): CC[A] = {
+    from(xss.foldLeft(View.empty[A])(_ ++ _))
+  }
 
+  implicit def iterableFactory[A]: Factory[A, CC[A]] = IterableFactory.toFactory(this)
 }
 
 object IterableFactory {
@@ -237,18 +257,21 @@ object IterableFactory {
     * @return A [[Factory]] that uses the given `factory` to build a collection of elements
     *         of type `A`
     */
-  implicit def toFactory[A, CC[_]](factory: IterableFactory[CC]): Factory[A, CC[A]] =
-    new Factory[A, CC[A]] {
-      def fromSpecific(it: IterableOnce[A]): CC[A] = factory.from[A](it)
-      def newBuilder: Builder[A, CC[A]] = factory.newBuilder[A]
-    }
+  implicit def toFactory[A, CC[_]](factory: IterableFactory[CC]): Factory[A, CC[A]] = new ToFactory[A, CC](factory)
+
+  @SerialVersionUID(3L)
+  private[this] class ToFactory[A, CC[_]](factory: IterableFactory[CC]) extends Factory[A, CC[A]] with Serializable {
+    def fromSpecific(it: IterableOnce[A]): CC[A] = factory.from[A](it)
+    def newBuilder: Builder[A, CC[A]] = factory.newBuilder[A]
+  }
 
   implicit def toBuildFrom[A, CC[_]](factory: IterableFactory[CC]): BuildFrom[Any, A, CC[A]] =
     new BuildFrom[Any, A, CC[A]] {
-      def fromSpecificIterable(from: Any)(it: Iterable[A]) = factory.from(it)
+      def fromSpecific(from: Any)(it: IterableOnce[A]) = factory.from(it)
       def newBuilder(from: Any) = factory.newBuilder
     }
 
+  @SerialVersionUID(3L)
   class Delegate[CC[_]](delegate: IterableFactory[CC]) extends IterableFactory[CC] {
     def empty[A]: CC[A] = delegate.empty
     def from[E](it: IterableOnce[E]): CC[E] = delegate.from(it)
@@ -259,19 +282,30 @@ object IterableFactory {
 /**
   * @tparam CC Collection type constructor (e.g. `List`)
   */
-trait SeqFactory[+CC[_]] extends IterableFactory[CC] {
-  def unapplySeq[A](x: CC[A] @uncheckedVariance): Some[CC[A]] = Some(x) //TODO is uncheckedVariance sound here?
+trait SeqFactory[+CC[A] <: SeqOps[A, Seq, Seq[A]]] extends IterableFactory[CC] {
+  import SeqFactory.UnapplySeqWrapper
+  final def unapplySeq[A](x: CC[A] @uncheckedVariance): UnapplySeqWrapper[A] = new UnapplySeqWrapper(x) // TODO is uncheckedVariance sound here?
 }
 
 object SeqFactory {
-  class Delegate[CC[_]](delegate: SeqFactory[CC]) extends SeqFactory[CC] {
+  @SerialVersionUID(3L)
+  class Delegate[CC[A] <: SeqOps[A, Seq, Seq[A]]](delegate: SeqFactory[CC]) extends SeqFactory[CC] {
     def empty[A]: CC[A] = delegate.empty
     def from[E](it: IterableOnce[E]): CC[E] = delegate.from(it)
     def newBuilder[A]: Builder[A, CC[A]] = delegate.newBuilder[A]
   }
+
+  final class UnapplySeqWrapper[A](private val c: SeqOps[A, Seq, Seq[A]]) extends AnyVal {
+    def isEmpty: Boolean = false
+    def get: UnapplySeqWrapper[A] = this
+    def lengthCompare(len: Int): Int = c.lengthCompare(len)
+    def apply(i: Int): A = c(i)
+    def drop(n: Int): scala.Seq[A] = c.view.drop(n).toSeq
+    def toSeq: scala.Seq[A] = c.toSeq
+  }
 }
 
-trait StrictOptimizedSeqFactory[+CC[_]] extends SeqFactory[CC] {
+trait StrictOptimizedSeqFactory[+CC[A] <: SeqOps[A, Seq, Seq[A]]] extends SeqFactory[CC] {
 
   override def fill[A](n: Int)(elem: => A): CC[A] = {
     val b = newBuilder[A]
@@ -295,6 +329,16 @@ trait StrictOptimizedSeqFactory[+CC[_]] extends SeqFactory[CC] {
     b.result()
   }
 
+  override def concat[A](xss: Iterable[A]*): CC[A] = {
+    val b = newBuilder[A]
+    val knownSizes = xss.view.map(_.knownSize)
+    if (knownSizes forall (_ >= 0)) {
+      b.sizeHint(knownSizes.sum)
+    }
+    for (xs <- xss) b ++= xs
+    b.result()
+  }
+
 }
 
 /**
@@ -303,14 +347,14 @@ trait StrictOptimizedSeqFactory[+CC[_]] extends SeqFactory[CC] {
   * @define factoryInfo
   *   This object provides a set of operations to create $Coll values.
   *   @author Martin Odersky
-  *   @version 2.8
+  *   @since  2.13
   *
   * @define coll collection
   * @define Coll `Iterable`
   */
 trait SpecificIterableFactory[-A, +C] extends Factory[A, C] {
   def empty: C
-  def apply(xs: A*): C = fromSpecific(new View.Elems(xs: _*))
+  def apply(xs: A*): C = fromSpecific(xs)
   def fill(n: Int)(elem: => A): C = fromSpecific(new View.Fill(n)(elem))
   def newBuilder: Builder[A, C]
 
@@ -321,12 +365,12 @@ trait SpecificIterableFactory[-A, +C] extends Factory[A, C] {
   * @define factoryInfo
   *   This object provides a set of operations to create $Coll values.
   *   @author Martin Odersky
-  *   @version 2.8
+  *   @since 2.13
   *
   * @define coll collection
   * @define Coll `Iterable`
   */
-trait MapFactory[+CC[_, _]] {
+trait MapFactory[+CC[_, _]] extends Serializable {
 
   def empty[K, V]: CC[K, V]
 
@@ -337,7 +381,6 @@ trait MapFactory[+CC[_, _]] {
   def newBuilder[K, V]: Builder[(K, V), CC[K, V]]
 
   implicit def mapFactory[K, V]: Factory[(K, V), CC[K, V]] = MapFactory.toFactory(this)
-
 }
 
 object MapFactory {
@@ -351,18 +394,21 @@ object MapFactory {
     * @return A [[Factory]] that uses the given `factory` to build a map with keys of type `K`
     *         and values of type `V`
     */
-  implicit def toFactory[K, V, CC[_, _]](factory: MapFactory[CC]): Factory[(K, V), CC[K, V]] =
-    new Factory[(K, V), CC[K, V]] {
-      def fromSpecific(it: IterableOnce[(K, V)]): CC[K, V] = factory.from[K, V](it)
-      def newBuilder: Builder[(K, V), CC[K, V]] = factory.newBuilder[K, V]
-    }
+  implicit def toFactory[K, V, CC[_, _]](factory: MapFactory[CC]): Factory[(K, V), CC[K, V]] = new ToFactory[K, V, CC](factory)
+
+  @SerialVersionUID(3L)
+  private[this] class ToFactory[K, V, CC[_, _]](factory: MapFactory[CC]) extends Factory[(K, V), CC[K, V]] with Serializable {
+    def fromSpecific(it: IterableOnce[(K, V)]): CC[K, V] = factory.from[K, V](it)
+    def newBuilder: Builder[(K, V), CC[K, V]] = factory.newBuilder[K, V]
+  }
 
   implicit def toBuildFrom[K, V, CC[_, _]](factory: MapFactory[CC]): BuildFrom[Any, (K, V), CC[K, V]] =
     new BuildFrom[Any, (K, V), CC[K, V]] {
-      def fromSpecificIterable(from: Any)(it: Iterable[(K, V)]) = factory.from(it)
+      def fromSpecific(from: Any)(it: IterableOnce[(K, V)]) = factory.from(it)
       def newBuilder(from: Any) = factory.newBuilder[K, V]
     }
 
+  @SerialVersionUID(3L)
   class Delegate[C[_, _]](delegate: MapFactory[C]) extends MapFactory[C] {
     def from[K, V](it: IterableOnce[(K, V)]): C[K, V] = delegate.from(it)
     def empty[K, V]: C[K, V] = delegate.empty
@@ -381,13 +427,13 @@ object MapFactory {
   * @define coll collection
   * @define Coll `Iterable`
   */
-trait EvidenceIterableFactory[+CC[_], Ev[_]] {
+trait EvidenceIterableFactory[+CC[_], Ev[_]] extends Serializable {
 
   def from[E : Ev](it: IterableOnce[E]): CC[E]
 
   def empty[A : Ev]: CC[A]
 
-  def apply[A : Ev](xs: A*): CC[A] = from(new View.Elems(xs: _*))
+  def apply[A : Ev](xs: A*): CC[A] = from(xs)
 
   /** Produces a $coll containing the results of some element computation a number of times.
     *  @param   n  the number of elements contained in the $coll.
@@ -402,6 +448,27 @@ trait EvidenceIterableFactory[+CC[_], Ev[_]] {
     *  @return A $coll consisting of elements `f(0), ..., f(n -1)`
     */
   def tabulate[A : Ev](n: Int)(f: Int => A): CC[A] = from(new View.Tabulate(n)(f))
+
+  /** Produces a $coll containing repeated applications of a function to a start value.
+    *
+    *  @param start the start value of the $coll
+    *  @param len   the number of elements contained in the $coll
+    *  @param f     the function that's repeatedly applied
+    *  @return      a $coll with `len` values in the sequence `start, f(start), f(f(start)), ...`
+    */
+  def iterate[A : Ev](start: A, len: Int)(f: A => A): CC[A] = from(new View.Iterate(start, len)(f))
+
+  /** Produces a $coll that uses a function `f` to produce elements of type `A`
+    * and update an internal state of type `S`.
+    *
+    * @param init State initial value
+    * @param f    Computes the next element (or returns `None` to signal
+    *             the end of the collection)
+    * @tparam A   Type of the elements
+    * @tparam S   Type of the internal state
+    * @return a $coll that produces elements using `f` until `f` returns `None`
+    */
+  def unfold[A : Ev, S](init: S)(f: S => Option[(A, S)]): CC[A] = from(new View.Unfold(init)(f))
 
   def newBuilder[A : Ev]: Builder[A, CC[A]]
 
@@ -419,18 +486,21 @@ object EvidenceIterableFactory {
     * @return A [[Factory]] that uses the given `factory` to build a collection of elements
     *         of type `A`
     */
-  implicit def toFactory[Ev[_], A: Ev, CC[_]](factory: EvidenceIterableFactory[CC, Ev]): Factory[A, CC[A]] =
-    new Factory[A, CC[A]] {
-      def fromSpecific(it: IterableOnce[A]): CC[A] = factory.from[A](it)
-      def newBuilder: Builder[A, CC[A]] = factory.newBuilder[A]
-    }
+  implicit def toFactory[Ev[_], A: Ev, CC[_]](factory: EvidenceIterableFactory[CC, Ev]): Factory[A, CC[A]] = new ToFactory[Ev, A, CC](factory)
 
-  implicit def toBuildFrom[Ev[_], A: Ev, CC[_]](factory: EvidenceIterableFactory[CC, Ev]): BuildFrom[Any, A, CC[A]] =
-    new BuildFrom[Any, A, CC[A]] {
-      def fromSpecificIterable(from: Any)(it: Iterable[A]): CC[A] = factory.from[A](it)
-      def newBuilder(from: Any): Builder[A, CC[A]] = factory.newBuilder[A]
-    }
+  @SerialVersionUID(3L)
+  private[this] class ToFactory[Ev[_], A: Ev, CC[_]](factory: EvidenceIterableFactory[CC, Ev]) extends Factory[A, CC[A]] with Serializable {
+    def fromSpecific(it: IterableOnce[A]): CC[A] = factory.from[A](it)
+    def newBuilder: Builder[A, CC[A]] = factory.newBuilder[A]
+  }
 
+  implicit def toBuildFrom[Ev[_], A: Ev, CC[_]](factory: EvidenceIterableFactory[CC, Ev]): BuildFrom[Any, A, CC[A]] = new EvidenceIterableFactoryToBuildFrom(factory)
+  private class EvidenceIterableFactoryToBuildFrom[Ev[_], A: Ev, CC[_]](factory: EvidenceIterableFactory[CC, Ev]) extends BuildFrom[Any, A, CC[A]] {
+    def fromSpecific(from: Any)(it: IterableOnce[A]): CC[A] = factory.from[A](it)
+    def newBuilder(from: Any): Builder[A, CC[A]] = factory.newBuilder[A]
+  }
+
+  @SerialVersionUID(3L)
   class Delegate[CC[_], Ev[_]](delegate: EvidenceIterableFactory[CC, Ev]) extends EvidenceIterableFactory[CC, Ev] {
     def empty[A : Ev]: CC[A] = delegate.empty
     def from[E : Ev](it: IterableOnce[E]): CC[E] = delegate.from(it)
@@ -444,6 +514,7 @@ object EvidenceIterableFactory {
 trait SortedIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, Ordering]
 
 object SortedIterableFactory {
+  @SerialVersionUID(3L)
   class Delegate[CC[_]](delegate: EvidenceIterableFactory[CC, Ordering])
     extends EvidenceIterableFactory.Delegate[CC, Ordering](delegate) with SortedIterableFactory[CC]
 }
@@ -455,15 +526,6 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
 
   @`inline` private[this] implicit def ccClassTag[X]: ClassTag[CC[X]] =
     ClassTag.AnyRef.asInstanceOf[ClassTag[CC[X]]] // Good enough for boxed vs primitive arrays
-
-  /** Produces a $coll containing repeated applications of a function to a start value.
-    *
-    *  @param start the start value of the $coll
-    *  @param len   the number of elements contained in the $coll
-    *  @param f     the function that's repeatedly applied
-    *  @return      a $coll with `len` values in the sequence `start, f(start), f(f(start)), ...`
-    */
-  def iterate[A : ClassTag](start: A, len: Int)(f: A => A): CC[A] = from(new View.Iterate(start, len)(f))
 
   /** Produces a $coll containing a sequence of increasing of integers.
     *
@@ -492,7 +554,7 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
   /** Produces a three-dimensional $coll containing the results of some element computation a number of times.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   elem the element computation
     *  @return  A $coll that contains the results of `n1 x n2 x n3` evaluations of `elem`.
     */
@@ -501,7 +563,7 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
   /** Produces a four-dimensional $coll containing the results of some element computation a number of times.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   elem the element computation
     *  @return  A $coll that contains the results of `n1 x n2 x n3 x n4` evaluations of `elem`.
@@ -512,7 +574,7 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
   /** Produces a five-dimensional $coll containing the results of some element computation a number of times.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   n5  the number of elements in the 5th dimension
     *  @param   elem the element computation
@@ -534,7 +596,7 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
   /** Produces a three-dimensional $coll containing values of a given function over ranges of integer values starting from 0.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   f   The function computing element values
     *  @return A $coll consisting of elements `f(i1, i2, i3)`
     *          for `0 <= i1 < n1`, `0 <= i2 < n2`, and `0 <= i3 < n3`.
@@ -545,7 +607,7 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
   /** Produces a four-dimensional $coll containing values of a given function over ranges of integer values starting from 0.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   f   The function computing element values
     *  @return A $coll consisting of elements `f(i1, i2, i3, i4)`
@@ -557,7 +619,7 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
   /** Produces a five-dimensional $coll containing values of a given function over ranges of integer values starting from 0.
     *  @param   n1  the number of elements in the 1st dimension
     *  @param   n2  the number of elements in the 2nd dimension
-    *  @param   n3  the number of elements in the 3nd dimension
+    *  @param   n3  the number of elements in the 3rd dimension
     *  @param   n4  the number of elements in the 4th dimension
     *  @param   n5  the number of elements in the 5th dimension
     *  @param   f   The function computing element values
@@ -569,17 +631,20 @@ trait ClassTagIterableFactory[+CC[_]] extends EvidenceIterableFactory[CC, ClassT
 }
 
 object ClassTagIterableFactory {
+  @SerialVersionUID(3L)
   class Delegate[CC[_]](delegate: EvidenceIterableFactory[CC, ClassTag])
     extends EvidenceIterableFactory.Delegate[CC, ClassTag](delegate) with ClassTagIterableFactory[CC]
 
   /** An IterableFactory that uses ClassTag.Any as the evidence for every element type. This may or may not be
     * sound depending on the use of the `ClassTag` by the collection implementation. */
+  @SerialVersionUID(3L)
   class AnyIterableDelegate[CC[_]](delegate: ClassTagIterableFactory[CC]) extends IterableFactory[CC] {
     def empty[A]: CC[A] = delegate.empty(ClassTag.Any).asInstanceOf[CC[A]]
     def from[A](it: IterableOnce[A]): CC[A] = delegate.from[Any](it)(ClassTag.Any).asInstanceOf[CC[A]]
     def newBuilder[A]: Builder[A, CC[A]] = delegate.newBuilder(ClassTag.Any).asInstanceOf[Builder[A, CC[A]]]
     override def apply[A](elems: A*): CC[A] = delegate.apply[Any](elems: _*)(ClassTag.Any).asInstanceOf[CC[A]]
     override def iterate[A](start: A, len: Int)(f: A => A): CC[A] = delegate.iterate[A](start, len)(f)(ClassTag.Any.asInstanceOf[ClassTag[A]])
+    override def unfold[A, S](init: S)(f: S => Option[(A, S)]): CC[A] = delegate.unfold[A, S](init)(f)(ClassTag.Any.asInstanceOf[ClassTag[A]])
     override def range[A](start: A, end: A)(implicit i: Integral[A]): CC[A] = delegate.range[A](start, end)(i, ClassTag.Any.asInstanceOf[ClassTag[A]])
     override def range[A](start: A, end: A, step: A)(implicit i: Integral[A]): CC[A] = delegate.range[A](start, end, step)(i, ClassTag.Any.asInstanceOf[ClassTag[A]])
     override def fill[A](n: Int)(elem: => A): CC[A] = delegate.fill[Any](n)(elem)(ClassTag.Any).asInstanceOf[CC[A]]
@@ -590,21 +655,24 @@ object ClassTagIterableFactory {
 /**
   * @tparam CC Collection type constructor (e.g. `ArraySeq`)
   */
-trait ClassTagSeqFactory[+CC[_]] extends ClassTagIterableFactory[CC] {
-  def unapplySeq[A](x: CC[A] @uncheckedVariance): Some[CC[A]] = Some(x) //TODO is uncheckedVariance sound here?
+trait ClassTagSeqFactory[+CC[A] <: SeqOps[A, Seq, Seq[A]]] extends ClassTagIterableFactory[CC] {
+  import SeqFactory.UnapplySeqWrapper
+  final def unapplySeq[A](x: CC[A] @uncheckedVariance): UnapplySeqWrapper[A] = new UnapplySeqWrapper(x) // TODO is uncheckedVariance sound here?
 }
 
 object ClassTagSeqFactory {
-  class Delegate[CC[_]](delegate: ClassTagSeqFactory[CC])
+  @SerialVersionUID(3L)
+  class Delegate[CC[A] <: SeqOps[A, Seq, Seq[A]]](delegate: ClassTagSeqFactory[CC])
     extends ClassTagIterableFactory.Delegate[CC](delegate) with ClassTagSeqFactory[CC]
 
   /** A SeqFactory that uses ClassTag.Any as the evidence for every element type. This may or may not be
     * sound depending on the use of the `ClassTag` by the collection implementation. */
-  class AnySeqDelegate[CC[_]](delegate: ClassTagSeqFactory[CC])
+  @SerialVersionUID(3L)
+  class AnySeqDelegate[CC[A] <: SeqOps[A, Seq, Seq[A]]](delegate: ClassTagSeqFactory[CC])
     extends ClassTagIterableFactory.AnyIterableDelegate[CC](delegate) with SeqFactory[CC]
 }
 
-trait StrictOptimizedClassTagSeqFactory[+CC[_]] extends ClassTagSeqFactory[CC] {
+trait StrictOptimizedClassTagSeqFactory[+CC[A] <: SeqOps[A, Seq, Seq[A]]] extends ClassTagSeqFactory[CC] {
 
   override def fill[A : ClassTag](n: Int)(elem: => A): CC[A] = {
     val b = newBuilder[A]
@@ -634,12 +702,12 @@ trait StrictOptimizedClassTagSeqFactory[+CC[_]] extends ClassTagSeqFactory[CC] {
   * @define factoryInfo
   *   This object provides a set of operations to create $Coll values.
   *   @author Martin Odersky
-  *   @version 2.8
+  *   @since 2.13
   *
   * @define coll collection
   * @define Coll `Iterable`
   */
-trait SortedMapFactory[+CC[_, _]] {
+trait SortedMapFactory[+CC[_, _]] extends Serializable {
 
   def empty[K : Ordering, V]: CC[K, V]
 
@@ -666,18 +734,21 @@ object SortedMapFactory {
     * @return A [[Factory]] that uses the given `factory` to build a map with keys of
     *         type `K` and values of type `V`
     */
-  implicit def toFactory[K : Ordering, V, CC[_, _]](factory: SortedMapFactory[CC]): Factory[(K, V), CC[K, V]] =
-    new Factory[(K, V), CC[K, V]] {
-      def fromSpecific(it: IterableOnce[(K, V)]): CC[K, V] = factory.from[K, V](it)
-      def newBuilder: Builder[(K, V), CC[K, V]] = factory.newBuilder[K, V]
-    }
+  implicit def toFactory[K : Ordering, V, CC[_, _]](factory: SortedMapFactory[CC]): Factory[(K, V), CC[K, V]] = new ToFactory[K, V, CC](factory)
 
-  implicit def toBuildFrom[K : Ordering, V, CC[_, _]](factory: SortedMapFactory[CC]): BuildFrom[Any, (K, V), CC[K, V]] =
-    new BuildFrom[Any, (K, V), CC[K, V]] {
-      def fromSpecificIterable(from: Any)(it: Iterable[(K, V)]) = factory.from(it)
-      def newBuilder(from: Any) = factory.newBuilder[K, V]
-    }
+  @SerialVersionUID(3L)
+  private[this] class ToFactory[K : Ordering, V, CC[_, _]](factory: SortedMapFactory[CC]) extends Factory[(K, V), CC[K, V]] with Serializable {
+    def fromSpecific(it: IterableOnce[(K, V)]): CC[K, V] = factory.from[K, V](it)
+    def newBuilder: Builder[(K, V), CC[K, V]] = factory.newBuilder[K, V]
+  }
 
+  implicit def toBuildFrom[K : Ordering, V, CC[_, _]](factory: SortedMapFactory[CC]): BuildFrom[Any, (K, V), CC[K, V]] = new SortedMapFactoryToBuildFrom(factory)
+  private class SortedMapFactoryToBuildFrom[K : Ordering, V, CC[_, _]](factory: SortedMapFactory[CC]) extends BuildFrom[Any, (K, V), CC[K, V]] {
+    def fromSpecific(from: Any)(it: IterableOnce[(K, V)]) = factory.from(it)
+    def newBuilder(from: Any) = factory.newBuilder[K, V]
+  }
+
+  @SerialVersionUID(3L)
   class Delegate[CC[_, _]](delegate: SortedMapFactory[CC]) extends SortedMapFactory[CC] {
     def from[K : Ordering, V](it: IterableOnce[(K, V)]): CC[K, V] = delegate.from(it)
     def empty[K : Ordering, V]: CC[K, V] = delegate.empty

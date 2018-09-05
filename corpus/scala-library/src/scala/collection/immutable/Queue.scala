@@ -9,7 +9,9 @@
 package scala.collection
 package immutable
 
-import scala.collection.mutable.{ Builder, ListBuffer }
+import java.io.{ObjectInputStream, ObjectOutputStream}
+
+import scala.collection.mutable.{Builder, ListBuffer}
 
 /** `Queue` objects implement data structures that allow to
   *  insert and retrieve elements in a first-in-first-out (FIFO) manner.
@@ -23,7 +25,6 @@ import scala.collection.mutable.{ Builder, ListBuffer }
   *  `n` remove operations with `O(1)` cost are guaranteed. Removing an item is on average `O(1)`.
   *
   *  @author  Erik Stenman
-  *  @version 1.0, 08/07/2003
   *  @since   1
   *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#immutable-queues "Scala's Collection Library overview"]]
   *  section on `Immutable Queues` for more information.
@@ -34,13 +35,12 @@ import scala.collection.mutable.{ Builder, ListBuffer }
   *  @define willNotTerminateInf
   */
 
-@SerialVersionUID(1L)
 sealed class Queue[+A] protected(protected val in: List[A], protected val out: List[A])
   extends AbstractSeq[A]
     with LinearSeq[A]
     with LinearSeqOps[A, Queue, Queue[A]]
-    with StrictOptimizedSeqOps[A, Queue, Queue[A]]
-    with Serializable {
+    with StrictOptimizedLinearSeqOps[A, Queue, Queue[A]]
+    with StrictOptimizedSeqOps[A, Queue, Queue[A]] {
 
   override def iterableFactory: SeqFactory[Queue] = Queue
 
@@ -90,7 +90,7 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
   override def exists(p: A => Boolean): Boolean =
     in.exists(p) || out.exists(p)
 
-  override def className = "Queue"
+  override protected[this] def className = "Queue"
 
   /** Returns the length of the queue. */
   override def length = in.length + out.length
@@ -99,7 +99,7 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
 
   override def appended[B >: A](elem: B): Queue[B] = enqueue(elem)
 
-  override def appendedAll[B >: A](that: scala.collection.Iterable[B]): Queue[B] = {
+  override def appendedAll[B >: A](that: scala.collection.IterableOnce[B]): Queue[B] = {
     val newIn = that match {
       case that: Queue[B] => that.in ++ (that.out reverse_::: this.in)
       case _ => ListBuffer.from(that).toList reverse_::: this.in
@@ -122,7 +122,18 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
     *
     *  @param  iter        an iterable object
     */
-  def enqueue[B >: A](iter: scala.collection.Iterable[B]) = new Queue(iter.toList reverse_::: in, out)
+  @deprecated("Use `enqueueAll` instead of `enqueue` to enqueue a collection of elements", "2.13.0")
+  @`inline` final def enqueue[B >: A](iter: scala.collection.Iterable[B]) = enqueueAll(iter)
+
+  /** Creates a new queue with all elements provided by an `Iterable` object
+    *  added at the end of the old queue.
+    *
+    *  The elements are appended in the order they are given out by the
+    *  iterator.
+    *
+    *  @param  iter        an iterable object
+    */
+  def enqueueAll[B >: A](iter: scala.collection.Iterable[B]) = new Queue(iter.toList reverse_::: in, out)
 
   /** Returns a tuple with the first element in the queue,
     *  and a new queue with this element removed.
@@ -160,13 +171,23 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
   *  @define Coll `immutable.Queue`
   *  @define coll immutable queue
   */
+@SerialVersionUID(3L)
 object Queue extends StrictOptimizedSeqFactory[Queue] {
   def newBuilder[A]: Builder[A, Queue[A]] = new ListBuffer[A] mapResult (x => new Queue[A](Nil, x.toList))
 
-  def from[A](source: IterableOnce[A]): Queue[A] = new Queue[A](Nil, ListBuffer.from(source).toList)
+  def from[A](source: IterableOnce[A]): Queue[A] = source match {
+    case q: Queue[A] => q
+    case _ if source.knownSize == 0 => empty[A]
+    case _ => new Queue[A](Nil, ListBuffer.from(source).toList)
+  }
 
   def empty[A]: Queue[A] = EmptyQueue
   override def apply[A](xs: A*): Queue[A] = new Queue[A](Nil, xs.toList)
 
   private object EmptyQueue extends Queue[Nothing](Nil, Nil) { }
+
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }

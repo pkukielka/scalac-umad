@@ -54,8 +54,17 @@ import scala.annotation.implicitNotFound
  * Application callback execution can be configured separately.
  */
 @implicitNotFound("""Cannot find an implicit ExecutionContext. You might pass
-an (implicit ec: ExecutionContext) parameter to your method
-or import scala.concurrent.ExecutionContext.Implicits.global.""")
+an (implicit ec: ExecutionContext) parameter to your method.
+
+The ExecutionContext is used to configure how and on which
+thread pools Futures will run, so the specific ExecutionContext
+that is selected is important.
+
+If your application does not define an ExecutionContext elsewhere,
+consider using Scala's global ExecutionContext by defining
+the following:
+
+implicit val ec = ExecutionContext.global""")
 trait ExecutionContext {
 
   /** Runs a block of code on this execution context.
@@ -68,7 +77,7 @@ trait ExecutionContext {
    *
    *  @param cause  the cause of the failure
    */
-  def reportFailure(@deprecatedName('t) cause: Throwable): Unit
+  def reportFailure(@deprecatedName("t") cause: Throwable): Unit
 
   /** Prepares for the execution of a task. Returns the prepared
      *  execution context. The recommended implementation of

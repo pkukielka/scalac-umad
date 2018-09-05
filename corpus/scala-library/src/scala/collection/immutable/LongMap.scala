@@ -9,9 +9,10 @@
 package scala.collection
 package immutable
 
+import java.io.{ObjectInputStream, ObjectOutputStream}
 import java.lang.IllegalStateException
 
-import scala.collection.generic.BitOperations
+import scala.collection.generic.{BitOperations, DefaultSerializationProxy}
 import scala.collection.mutable.{Builder, ImmutableBuilder, ListBuffer}
 import scala.annotation.tailrec
 import scala.annotation.tailrec
@@ -58,7 +59,6 @@ object LongMap {
       def addOne(elem: (Long, V)): this.type = { elems = elems + elem; this }
     }
 
-  @SerialVersionUID(3L)
   private[immutable] case object Nil extends LongMap[Nothing] {
     // Important, don't remove this! See IntMap for explanation.
     override def equals(that : Any) = that match {
@@ -68,20 +68,40 @@ object LongMap {
     }
   }
 
-  @SerialVersionUID(3L)
   private[immutable] case class Tip[+T](key: Long, value: T) extends LongMap[T] {
     def withValue[S](s: S) =
       if (s.asInstanceOf[AnyRef] eq value.asInstanceOf[AnyRef]) this.asInstanceOf[LongMap.Tip[S]]
       else LongMap.Tip(key, s)
   }
 
-  @SerialVersionUID(3L)
   private[immutable] case class Bin[+T](prefix: Long, mask: Long, left: LongMap[T], right: LongMap[T]) extends LongMap[T] {
     def bin[S](left: LongMap[S], right: LongMap[S]): LongMap[S] = {
       if ((this.left eq left) && (this.right eq right)) this.asInstanceOf[LongMap.Bin[S]]
       else LongMap.Bin[S](prefix, mask, left, right)
     }
   }
+
+  implicit def toFactory[V](dummy: LongMap.type): Factory[(Long, V), LongMap[V]] = ToFactory.asInstanceOf[Factory[(Long, V), LongMap[V]]]
+
+  @SerialVersionUID(3L)
+  private[this] object ToFactory extends Factory[(Long, AnyRef), LongMap[AnyRef]] with Serializable {
+    def fromSpecific(it: IterableOnce[(Long, AnyRef)]): LongMap[AnyRef] = LongMap.from[AnyRef](it)
+    def newBuilder: Builder[(Long, AnyRef), LongMap[AnyRef]] = LongMap.newBuilder[AnyRef]
+  }
+
+  implicit def toBuildFrom[V](factory: LongMap.type): BuildFrom[Any, (Long, V), LongMap[V]] = ToBuildFrom.asInstanceOf[BuildFrom[Any, (Long, V), LongMap[V]]]
+  private[this] object ToBuildFrom extends BuildFrom[Any, (Long, AnyRef), LongMap[AnyRef]] {
+    def fromSpecific(from: Any)(it: IterableOnce[(Long, AnyRef)]) = LongMap.from(it)
+    def newBuilder(from: Any) = LongMap.newBuilder[AnyRef]
+  }
+
+  implicit def iterableFactory[V]: Factory[(Long, V), LongMap[V]] = toFactory(this)
+  implicit def buildFromLongMap[V]: BuildFrom[LongMap[_], (Long, V), LongMap[V]] = toBuildFrom(this)
+
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }
 
 // Iterator over a non-empty LongMap.
@@ -156,13 +176,11 @@ private[immutable] class LongMapKeyIterator[V](it: LongMap[V]) extends LongMapIt
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 sealed abstract class LongMap[+T] extends AbstractMap[Long, T]
   with MapOps[Long, T, Map, LongMap[T]]
-  with StrictOptimizedIterableOps[(Long, T), Iterable, LongMap[T]]
-  with Serializable {
+  with StrictOptimizedIterableOps[(Long, T), Iterable, LongMap[T]] {
 
-  override protected def fromSpecificIterable(coll: scala.collection.Iterable[(Long, T)] @uncheckedVariance): LongMap[T] = {
+  override protected def fromSpecific(coll: scala.collection.IterableOnce[(Long, T)] @uncheckedVariance): LongMap[T] = {
     //TODO should this be the default implementation of this method in StrictOptimizedIterableOps?
     val b = newSpecificBuilder
     b.sizeHint(coll)
@@ -212,7 +230,7 @@ sealed abstract class LongMap[+T] extends AbstractMap[Long, T]
     *
     * @param f The loop body
     */
-  final def foreachKey(f: Long => Unit): Unit = this match {
+  final def foreachKey[U](f: Long => U): Unit = this match {
     case LongMap.Bin(_, _, left, right) => { left.foreachKey(f); right.foreachKey(f) }
     case LongMap.Tip(key, _) => f(key)
     case LongMap.Nil =>
@@ -229,16 +247,16 @@ sealed abstract class LongMap[+T] extends AbstractMap[Long, T]
     *
     * @param f The loop body
     */
-  final def foreachValue(f: T => Unit): Unit = this match {
+  final def foreachValue[U](f: T => U): Unit = this match {
     case LongMap.Bin(_, _, left, right) => { left.foreachValue(f); right.foreachValue(f) }
     case LongMap.Tip(_, value) => f(value)
     case LongMap.Nil =>
   }
 
-  override def className = "LongMap"
+  override protected[this] def className = "LongMap"
 
   override def isEmpty = this == LongMap.Nil
-
+  override def knownSize: Int = if (isEmpty) 0 else super.knownSize
   override def filter(f: ((Long, T)) => Boolean): LongMap[T] = this match {
     case LongMap.Bin(prefix, mask, left, right) => {
       val (newleft, newright) = (left.filter(f), right.filter(f))
@@ -455,12 +473,13 @@ sealed abstract class LongMap[+T] extends AbstractMap[Long, T]
 
   def flatMap[V2](f: ((Long, T)) => IterableOnce[(Long, V2)]): LongMap[V2] = LongMap.from(new View.FlatMap(coll, f))
 
-  override def concat[V1 >: T](that: scala.collection.Iterable[(Long, V1)]): LongMap[V1] =
+  override def concat[V1 >: T](that: scala.collection.IterableOnce[(Long, V1)]): LongMap[V1] =
     super.concat(that).asInstanceOf[LongMap[V1]] // Already has corect type but not declared as such
 
   override def ++ [V1 >: T](that: scala.collection.Iterable[(Long, V1)]): LongMap[V1] = concat(that)
 
   def collect[V2](pf: PartialFunction[(Long, T), (Long, V2)]): LongMap[V2] =
-    flatMap(kv => if (pf.isDefinedAt(kv)) new View.Single(pf(kv)) else View.Empty)
+    strictOptimizedCollect(LongMap.newBuilder[V2], pf)
 
+  override protected[this] def writeReplace(): AnyRef = new DefaultSerializationProxy(LongMap.toFactory[T](LongMap), this)
 }

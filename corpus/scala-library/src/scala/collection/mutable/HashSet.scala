@@ -7,7 +7,6 @@ package mutable
   *
   * @author  Matthias Zenger
   * @author  Martin Odersky
-  * @version 2.0, 31/12/2006
   * @since   1
   * @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#hash-tables "Scala's Collection Library overview"]]
   * section on `Hash Tables` for more information.
@@ -17,18 +16,15 @@ package mutable
   * @define mayNotTerminateInf
   * @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 final class HashSet[A]
   extends AbstractSet[A]
     with SetOps[A, HashSet, HashSet[A]]
-    with StrictOptimizedIterableOps[A, HashSet, HashSet[A]]
-    with Serializable {
+    with StrictOptimizedIterableOps[A, HashSet, HashSet[A]] {
 
   @transient private[this] var table = new FlatHashTable[A]
 
   // Used by scala-java8-compat (private[mutable] erases to public, so Java code can access it)
   private[mutable] def getTable: FlatHashTable[A] = table
-
   override def iterator: Iterator[A] = table.iterator
 
   override def iterableFactory: IterableFactory[HashSet] = HashSet
@@ -42,11 +38,19 @@ final class HashSet[A]
     this
   }
 
+  override def add(elem: A): Boolean = table.addElem(elem)
+
+  override def remove(elem: A): Boolean = table.removeElem(elem)
+
   def clear(): Unit = table.clearTable()
 
   def contains(elem: A): Boolean = table.containsElem(elem)
 
-  def get(elem: A): Option[A] = table.findEntry(elem)
+  override def knownSize: Int = table.size
+
+  override def size: Int = table.size
+
+  override def isEmpty: Boolean = size == 0
 
   override def foreach[U](f: A => U): Unit = {
     var i = 0
@@ -69,6 +73,8 @@ final class HashSet[A]
     table = new FlatHashTable[A]
     table.init(in, x => ())
   }
+
+  override protected[this] def stringPrefix = "HashSet"
 }
 
 /**
@@ -76,6 +82,7 @@ final class HashSet[A]
   * @define Coll `mutable.HashSet`
   * @define coll mutable hash set
   */
+@SerialVersionUID(3L)
 object HashSet extends IterableFactory[HashSet] {
 
   def from[B](it: scala.collection.IterableOnce[B]): HashSet[B] = Growable.from(empty[B], it)

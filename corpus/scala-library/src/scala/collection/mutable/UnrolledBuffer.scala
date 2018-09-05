@@ -9,6 +9,8 @@
 package scala.collection
 package mutable
 
+import java.io.{ObjectInputStream, ObjectOutputStream}
+
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import scala.collection.immutable.Nil
@@ -40,16 +42,14 @@ import scala.collection.immutable.Nil
   *  @author Aleksandar Prokopec
   *
   */
-@SerialVersionUID(3L)
 sealed class UnrolledBuffer[T](implicit val tag: ClassTag[T])
   extends AbstractBuffer[T]
     with Buffer[T]
     with Seq[T]
     with SeqOps[T, UnrolledBuffer, UnrolledBuffer[T]]
     with StrictOptimizedSeqOps[T, UnrolledBuffer, UnrolledBuffer[T]]
-    with Builder[T, UnrolledBuffer[T]]
-    with Serializable
-{
+    with Builder[T, UnrolledBuffer[T]] {
+
   import UnrolledBuffer.Unrolled
 
   @transient private var headptr = newUnrolled
@@ -62,7 +62,7 @@ sealed class UnrolledBuffer[T](implicit val tag: ClassTag[T])
   private[collection] def lastPtr_=(last: Unrolled[T]) = lastptr = last
   private[collection] def size_=(s: Int) = sz = s
 
-  override protected def fromSpecificIterable(coll: scala.collection.Iterable[T]) = UnrolledBuffer.from(coll)
+  override protected def fromSpecific(coll: scala.collection.IterableOnce[T]) = UnrolledBuffer.from(coll)
   override protected def newSpecificBuilder: Builder[T, UnrolledBuffer[T]] = new UnrolledBuffer[T]
 
   override def iterableFactory: SeqFactory[UnrolledBuffer] = UnrolledBuffer.untagged
@@ -188,7 +188,7 @@ sealed class UnrolledBuffer[T](implicit val tag: ClassTag[T])
       sz += headptr.insertAll(idx, elems, this)
     } else throw new IndexOutOfBoundsException(idx.toString)
 
-  def subtractOne(elem: T): this.type = {
+  override def subtractOne(elem: T): this.type = {
     headptr.subtractOne(elem, this)
     this
   }
@@ -222,10 +222,11 @@ sealed class UnrolledBuffer[T](implicit val tag: ClassTag[T])
 
   override def clone(): UnrolledBuffer[T] = new UnrolledBuffer[T] ++= this
 
-  override def className = "UnrolledBuffer"
+  override protected[this] def className = "UnrolledBuffer"
 }
 
 
+@SerialVersionUID(3L)
 object UnrolledBuffer extends StrictOptimizedClassTagSeqFactory[UnrolledBuffer] { self =>
 
   val untagged: SeqFactory[UnrolledBuffer] = new ClassTagSeqFactory.AnySeqDelegate(self)
@@ -418,5 +419,8 @@ object UnrolledBuffer extends StrictOptimizedClassTagSeqFactory[UnrolledBuffer] 
       array.take(size).mkString("Unrolled@%08x".format(System.identityHashCode(this)) + "[" + size + "/" + array.length + "](", ", ", ")") + " -> " + (if (next ne null) next.toString else "")
   }
 
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }
-

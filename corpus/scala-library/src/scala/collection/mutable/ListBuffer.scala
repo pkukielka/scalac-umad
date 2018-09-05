@@ -1,19 +1,17 @@
 package scala.collection
 package mutable
 
-import scala.annotation.unchecked.uncheckedVariance
 import scala.annotation.tailrec
-import scala.Int._
 import scala.collection.immutable.{List, Nil, ::}
 import scala.annotation.tailrec
 import java.lang.{IllegalArgumentException, IndexOutOfBoundsException}
+import scala.runtime.Statics.releaseFence
 
 /** A `Buffer` implementation backed by a list. It provides constant time
   *  prepend and append. Most other operations are linear.
   *
   *  @author  Matthias Zenger
   *  @author  Martin Odersky
-  *  @version 2.8
   *  @since   1
   *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#list-buffers "Scala's Collection Library overview"]]
   *  section on `List Buffers` for more information.
@@ -27,20 +25,18 @@ import java.lang.{IllegalArgumentException, IndexOutOfBoundsException}
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 class ListBuffer[A]
   extends AbstractBuffer[A]
      with SeqOps[A, ListBuffer, ListBuffer[A]]
      with StrictOptimizedSeqOps[A, ListBuffer, ListBuffer[A]]
-     with ReusableBuilder[A, immutable.List[A]]
-     with Serializable {
+     with ReusableBuilder[A, immutable.List[A]] {
 
   private var first: List[A] = Nil
   private var last0: ::[A] = null
-  private var aliased = false
-  private var len = 0
+  private[this] var aliased = false
+  private[this] var len = 0
 
-  private type Predecessor[A] = ::[A] /*| Null*/
+  private type Predecessor[A0] = ::[A0] /*| Null*/
 
   def iterator = first.iterator
 
@@ -66,6 +62,10 @@ class ListBuffer[A]
   // Avoids copying where possible.
   override def toList: List[A] = {
     aliased = nonEmpty
+    // We've accumulated a number of mutations to `List.tail` by this stage.
+    // Make sure they are visible to threads that the client of this ListBuffer might be about
+    // to share this List with.
+    releaseFence()
     first
   }
 
@@ -100,7 +100,7 @@ class ListBuffer[A]
     this
   }
 
-  def subtractOne(elem: A): this.type = {
+  override def subtractOne(elem: A): this.type = {
     ensureUnaliased()
     if (isEmpty) {}
     else if (first.head == elem) {
@@ -280,10 +280,11 @@ class ListBuffer[A]
     this
   }
 
-  override def className = "ListBuffer"
+  override protected[this] def stringPrefix = "ListBuffer"
 
 }
 
+@SerialVersionUID(3L)
 object ListBuffer extends StrictOptimizedSeqFactory[ListBuffer] {
 
   def from[A](coll: collection.IterableOnce[A]): ListBuffer[A] = new ListBuffer[A] ++= coll

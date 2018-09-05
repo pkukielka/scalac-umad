@@ -10,6 +10,7 @@ package scala
 package collection
 package concurrent
 
+import java.io.{ObjectInputStream, ObjectOutputStream}
 import java.util.concurrent.atomic._
 
 import scala.annotation.tailrec
@@ -250,7 +251,7 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
               if (ct.isReadOnly || (startgen eq in.gen)) in.rec_lookup(k, hc, lev + 5, this, startgen, ct)
               else {
                 if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_lookup(k, hc, lev, parent, startgen, ct)
-                else RESTART // used to be throw RestartException
+                else RESTART
               }
             case sn: SNode[K, V] => // 2) singleton node
               if (sn.hc == hc && equal(sn.k, k, ct)) sn.v.asInstanceOf[AnyRef]
@@ -260,7 +261,7 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
       case tn: TNode[K, V] => // 3) non-live node
         def cleanReadOnly(tn: TNode[K, V]) = if (ct.nonReadOnly) {
           clean(parent, ct, lev - 5)
-          RESTART // used to be throw RestartException
+          RESTART
         } else {
           if (tn.hc == hc && tn.k == k) tn.v.asInstanceOf[AnyRef]
           else null
@@ -637,16 +638,14 @@ private[concurrent] case class RDCSS_Descriptor[K, V](old: INode[K, V], expected
   *  @author Aleksandar Prokopec
   *  @since 2.10
   */
-@SerialVersionUID(3L)
 final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater[TrieMap[K, V], AnyRef], hashf: Hashing[K], ef: Equiv[K])
   extends scala.collection.mutable.AbstractMap[K, V]
     with scala.collection.concurrent.Map[K, V]
-    with scala.collection.mutable.MapOps[K, V, TrieMap, TrieMap[K, V]]
-    with Serializable
-{
-  private var hashingobj = if (hashf.isInstanceOf[Hashing.Default[_]]) new TrieMap.MangledHashing[K] else hashf
-  private var equalityobj = ef
-  private var rootupdater = rtupd
+    with scala.collection.mutable.MapOps[K, V, TrieMap, TrieMap[K, V]] {
+
+  private[this] var hashingobj = if (hashf.isInstanceOf[Hashing.Default[_]]) new TrieMap.MangledHashing[K] else hashf
+  private[this] var equalityobj = ef
+  private[this] var rootupdater = rtupd
   def hashing = hashingobj
   def equality = equalityobj
   @volatile private var root = r
@@ -758,19 +757,6 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
     if (res eq INodeBase.RESTART) lookuphc(k, hc)
     else res
   }
-
-  /* slower:
-  //@tailrec
-  private def lookuphc(k: K, hc: Int): AnyRef = {
-    val r = RDCSS_READ_ROOT()
-    try {
-      r.rec_lookup(k, hc, 0, null, r.gen, this)
-    } catch {
-      case RestartException =>
-        lookuphc(k, hc)
-    }
-  }
-  */
 
   @tailrec private def removehc(k: K, v: V, hc: Int): Option[V] = {
     val r = RDCSS_READ_ROOT()
@@ -932,9 +918,10 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
     insertifhc(k, hc, v, INode.KEY_PRESENT)
   }
 
-  def iterator: Iterator[(K, V)] =
+  def iterator: Iterator[(K, V)] = {
     if (nonReadOnly) readOnlySnapshot().iterator
     else new TrieMapIterator(0, this)
+  }
 
   ////////////////////////////////////////////////////////////////////////////
   //
@@ -951,14 +938,14 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
     if (nonReadOnly) readOnlySnapshot().keySet
     else super.keySet
   }
-  override def filterKeys(p: K => Boolean): collection.MapView[K, V] = {
-    if (nonReadOnly) readOnlySnapshot().filterKeys(p)
-    else super.filterKeys(p)
-  }
-  override def mapValues[W](f: V => W): collection.MapView[K, W] = {
-    if (nonReadOnly) readOnlySnapshot().mapValues(f)
-    else super.mapValues(f)
-  }
+
+  override def view: MapView[K, V] = if (nonReadOnly) readOnlySnapshot().view else super.view
+
+  @deprecated("Use .view.filterKeys(f). A future version will include a strict version of this method (for now, .view.filterKeys(p).toMap).", "2.13.0")
+  override def filterKeys(p: K => Boolean): collection.MapView[K, V] = view.filterKeys(p)
+
+  @deprecated("Use .view.mapValues(f). A future version will include a strict version of this method (for now, .view.mapValues(f).toMap).", "2.13.0")
+  override def mapValues[W](f: V => W): collection.MapView[K, W] = view.mapValues(f)
   // END extra overrides
   ///////////////////////////////////////////////////////////////////
 
@@ -971,12 +958,13 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
   override def size: Int =
     if (nonReadOnly) readOnlySnapshot().size
     else cachedSize()
-
-  override def className = "TrieMap"
+  override def isEmpty: Boolean = size == 0
+  override protected[this] def className = "TrieMap"
 
 }
 
 
+@SerialVersionUID(3L)
 object TrieMap extends MapFactory[TrieMap] {
 
   def empty[K, V]: TrieMap[K, V] = new TrieMap[K, V]
@@ -991,10 +979,14 @@ object TrieMap extends MapFactory[TrieMap] {
     def hash(k: K)= scala.util.hashing.byteswap32(k.##)
   }
 
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }
 
 
-private[collection] class TrieMapIterator[K, V](var level: Int, private var ct: TrieMap[K, V], mustInit: Boolean = true) extends Iterator[(K, V)] {
+private[collection] class TrieMapIterator[K, V](var level: Int, private var ct: TrieMap[K, V], mustInit: Boolean = true) extends AbstractIterator[(K, V)] {
   private val stack = new Array[Array[BasicNode]](7)
   private val stackpos = new Array[Int](7)
   private var depth = -1
@@ -1120,9 +1112,6 @@ private[collection] class TrieMapIterator[K, V](var level: Int, private var ct: 
   }
 
 }
-
-
-private[concurrent] object RestartException extends ControlThrowable
 
 
 /** Only used for ctrie serialization. */

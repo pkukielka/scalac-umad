@@ -14,7 +14,8 @@ object Option {
 
   /** An implicit conversion that converts an option to an iterable value
    */
-  implicit def option2Iterable[A](xo: Option[A]): Iterable[A] = xo.toList
+  implicit def option2Iterable[A](xo: Option[A]): Iterable[A] =
+    if (xo.isEmpty) Iterable.empty else Iterable.single(xo.get)
 
   /** An Option factory which creates Some(x) if the argument is not null,
    *  and None if it is null.
@@ -89,7 +90,7 @@ object Option {
  *
  *  @author  Martin Odersky
  *  @author  Matthias Zenger
- *  @version 1.1, 16/01/2007
+ *  @since   1.1
  *  @define none `None`
  *  @define some [[scala.Some]]
  *  @define option [[scala.Option]]
@@ -103,9 +104,6 @@ object Option {
  *  @define willNotTerminateInf
  *  @define collectExample
  *  @define undefinedorder
- *  @define thatinfo the class of the returned collection. In the standard library configuration, `That` is `Iterable[B]`
- *  @define bfinfo an implicit value of class `CanBuildFrom` which determines the result class `That` from the current
- *    representation type `Repr` and the new element type `B`.
  */
 @SerialVersionUID(-114498752079829388L) // value computed by serialver for 2.11.2, annotation added in 2.11.4
 sealed abstract class Option[+A] extends Product with Serializable {
@@ -266,7 +264,7 @@ sealed abstract class Option[+A] extends Product with Serializable {
    *  @see map
    *  @see flatMap
    */
-  @inline final def foreach[U](f: A => U) {
+  @inline final def foreach[U](f: A => U): Unit = {
     if (!isEmpty) f(this.get)
   }
 
@@ -360,7 +358,7 @@ sealed abstract class Option[+A] extends Product with Serializable {
  *  `A`.
  *
  *  @author  Martin Odersky
- *  @version 1.0, 16/07/2003
+ *  @since   1.0
  */
 @SerialVersionUID(1234815782226070388L) // value computed by serialver for 2.11.2, annotation added in 2.11.4
 final case class Some[+A](value: A) extends Option[A] {
@@ -372,7 +370,7 @@ final case class Some[+A](value: A) extends Option[A] {
 /** This case object represents non-existent values.
  *
  *  @author  Martin Odersky
- *  @version 1.0, 16/07/2003
+ *  @since   1.0
  */
 @SerialVersionUID(5066590221178148012L) // value computed by serialver for 2.11.2, annotation added in 2.11.4
 case object None extends Option[Nothing] {

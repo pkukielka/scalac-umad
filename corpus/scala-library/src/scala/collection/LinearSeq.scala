@@ -8,8 +8,11 @@ import scala.language.higherKinds
   *  `tail` operations.
   *  Known subclasses: List, LazyList
   */
-trait LinearSeq[+A] extends Seq[A] with LinearSeqOps[A, LinearSeq, LinearSeq[A]]
+trait LinearSeq[+A] extends Seq[A] with LinearSeqOps[A, LinearSeq, LinearSeq[A]] {
+  override protected[this] def stringPrefix: String = "LinearSeq"
+}
 
+@SerialVersionUID(3L)
 object LinearSeq extends SeqFactory.Delegate[LinearSeq](immutable.List)
 
 /** Base trait for linear Seq operations */
@@ -18,23 +21,33 @@ trait LinearSeqOps[+A, +CC[X] <: LinearSeq[X], +C <: LinearSeq[A] with LinearSeq
   // To be overridden in implementations:
   def isEmpty: Boolean
   def head: A
-  def tail: LinearSeq[A]
+  def tail: C
 
-  // `iterator` is implemented in terms of `head` and `tail`
-  def iterator = new Iterator[A] {
-    private[this] var current: Iterable[A] = toIterable
-    def hasNext = !current.isEmpty
-    def next() = { val r = current.head; current = current.tail; r }
-  }
+  def iterator: Iterator[A] =
+    if (knownSize == 0) Iterator.empty
+    else new LinearSeqIterator[A](toSeq)
 
   def length: Int = {
-    var these = toIterable
+    var these = coll
     var len = 0
-    while (!these.isEmpty) {
+    while (these.nonEmpty) {
       len += 1
       these = these.tail
     }
     len
+  }
+
+  override def last: A = {
+    if (isEmpty) throw new NoSuchElementException("LinearSeq.last")
+    else {
+      var these = coll
+      var scout = tail
+      while (scout.nonEmpty) {
+        these = scout
+        scout = scout.tail
+      }
+      these.head
+    }
   }
 
   override def lengthCompare(len: Int): Int = {
@@ -51,19 +64,6 @@ trait LinearSeqOps[+A, +CC[X] <: LinearSeq[X], +C <: LinearSeq[A] with LinearSeq
   }
 
   override def isDefinedAt(x: Int): Boolean = x >= 0 && lengthCompare(x) > 0
-
-  // Optimized version of `drop` that avoids copying
-  override def drop(n: Int): C = {
-    @tailrec def loop(n: Int, s: LinearSeq[A]): C =
-      if (n <= 0 || s.isEmpty) s.asInstanceOf[C]
-      // implicit contract to guarantee success of asInstanceOf:
-      //   (1) coll is of type C[A]
-      //   (2) The tail of a LinearSeq is of the same type as the type of the sequence itself
-      // it's surprisingly tricky/ugly to turn this into actual types, so we
-      // leave this contract implicit.
-      else loop(n - 1, s.tail)
-    loop(n, coll)
-  }
 
   // `apply` is defined in terms of `drop`, which is in turn defined in
   //  terms of `tail`.
@@ -172,6 +172,52 @@ trait LinearSeqOps[+A, +CC[X] <: LinearSeq[X], +C <: LinearSeq[A] with LinearSeq
     last
   }
 
+  /** $willForceEvaluation */
   override def tails: Iterator[C] =
-    Iterator.iterate(coll)(_.tail).takeWhile(_.nonEmpty) ++ Iterator(newSpecificBuilder.result())
+    Iterator.iterate(coll)(_.tail).takeWhile(_.nonEmpty) ++ Iterator.single(newSpecificBuilder.result())
+}
+
+trait StrictOptimizedLinearSeqOps[+A, +CC[X] <: LinearSeq[X], +C <: LinearSeq[A] with StrictOptimizedLinearSeqOps[A, CC, C]] extends LinearSeqOps[A, CC, C] with StrictOptimizedSeqOps[A, CC, C] {
+  // A more efficient iterator implementation than the default LinearSeqIterator
+  override def iterator: Iterator[A] = new AbstractIterator[A] {
+    private[this] var current: Iterable[A] = toIterable
+    def hasNext = !current.isEmpty
+    def next() = { val r = current.head; current = current.tail; r }
+  }
+
+  // Optimized version of `drop` that avoids copying
+  override def drop(n: Int): C = {
+    @tailrec def loop(n: Int, s: C): C =
+      if (n <= 0 || s.isEmpty) s
+      else loop(n - 1, s.tail)
+    loop(n, coll)
+  }
+
+  override def dropWhile(p: A => Boolean): C = {
+    @tailrec def loop(s: C): C =
+      if (s.nonEmpty && p(s.head)) loop(s.tail)
+      else s
+    loop(coll)
+  }
+}
+
+/** A specialized Iterator for LinearSeqs that is lazy enough for Stream and LazyList. This is accomplished by not
+  * evaluating the tail after returning the current head.
+  */
+private[collection] final class LinearSeqIterator[A](coll: Seq[A]) extends AbstractIterator[A] {
+  // A call-by-need cell
+  private[this] final class LazyCell(st: => Seq[A]) { lazy val v = st }
+
+  private[this] var these: LazyCell = new LazyCell(coll)
+
+  def hasNext: Boolean = these.v.nonEmpty
+
+  def next(): A =
+    if (isEmpty) Iterator.empty.next()
+    else {
+      val cur    = these.v
+      val result = cur.head
+      these = new LazyCell(cur.tail)
+      result
+    }
 }

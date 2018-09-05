@@ -11,7 +11,7 @@ package runtime
 
 
 import scala.collection.{BuildFrom, IterableOps}
-import scala.language.{ higherKinds, implicitConversions }
+import scala.language.implicitConversions
 
 /** See comment on ZippedIterable2
  *  @define Coll `ZippedIterable3`
@@ -19,17 +19,22 @@ import scala.language.{ higherKinds, implicitConversions }
  *  @define collectExample
  *  @define willNotTerminateInf
  */
+@deprecated("Use scala.collection.LazyZip3.", "2.13.0")
 trait ZippedIterable3[+El1, +El2, +El3] extends Any {
   def iterator: Iterator[(El1, El2, El3)]
+  def isEmpty: Boolean
 }
+@deprecated("Use scala.collection.LazyZip3.", "2.13.0")
 object ZippedIterable3 {
   implicit def zippedIterable3ToIterable[El1, El2, El3](zz: ZippedIterable3[El1, El2, El3]): Iterable[(El1, El2, El3)] = {
     new scala.collection.AbstractIterable[(El1, El2, El3)] {
       def iterator: Iterator[(El1, El2, El3)] = zz.iterator
+      override def isEmpty: Boolean = zz.isEmpty
     }
   }
 }
 
+@deprecated("Use scala.collection.LazyZip3.", "2.13.0")
 final class Tuple3Zipped[El1, It1 <: Iterable[El1], El2, It2 <: Iterable[El2], El3, It3 <: Iterable[El3]](private val colls: (It1, It2, It3))
         extends AnyVal with ZippedIterable3[El1, El2, El3] {
 
@@ -111,7 +116,7 @@ final class Tuple3Zipped[El1, It1 <: Iterable[El1], El2, It2 <: Iterable[El2], E
     !exists((x, y, z) => !p(x, y, z))
 
   def iterator: Iterator[(El1, El2, El3)] = coll1.iterator.zip(coll2.iterator).zip(coll3.iterator).map { case ((a, b), c) => (a, b, c)}
-
+  override def isEmpty: Boolean = coll1.isEmpty || coll2.isEmpty || coll3.isEmpty
   def foreach[U](f: (El1, El2, El3) => U): Unit = {
     val elems2 = coll2.iterator
     val elems3 = coll3.iterator
@@ -127,6 +132,7 @@ final class Tuple3Zipped[El1, It1 <: Iterable[El1], El2, It2 <: Iterable[El2], E
   override def toString = s"($coll1, $coll2, $coll3).zipped"
 }
 
+@deprecated("Use scala.collection.LazyZip3.", "2.13.0")
 object Tuple3Zipped {
   final class Ops[T1, T2, T3](private val x: (T1, T2, T3)) extends AnyVal {
     def invert[El1, It1 <: Iterable[El1], El2, It2 <: Iterable[El2], El3, It3 <: Iterable[El3], That]
@@ -149,6 +155,6 @@ object Tuple3Zipped {
       (implicit w1: T1 => IterableOps[El1, Iterable, It1] with It1,
                 w2: T2 => IterableOps[El2, Iterable, It2] with It2,
                 w3: T3 => IterableOps[El3, Iterable, It3] with It3
-      ): Tuple3Zipped[El1, It1, El2, It2, El3, It3] = new Tuple3Zipped((x._1, x._2, x._3))
+      ): Tuple3Zipped[El1, It1, El2, It2, El3, It3] = new Tuple3Zipped((w1(x._1), w2(x._2), w3(x._3)))
   }
 }

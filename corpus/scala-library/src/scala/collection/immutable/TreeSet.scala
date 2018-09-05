@@ -12,7 +12,6 @@ import immutable.{RedBlackTree => RB}
   *  @param ordering   the implicit ordering used to compare objects of type `A`
   *
   *  @author  Martin Odersky
-  *  @version 2.0, 02/01/2007
   *  @since   1
   *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#red-black-trees "Scala's Collection Library overview"]]
   *  section on `Red-Black Trees` for more information.
@@ -24,14 +23,12 @@ import immutable.{RedBlackTree => RB}
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 final class TreeSet[A] private (tree: RB.Tree[A, Unit])(implicit val ordering: Ordering[A])
   extends AbstractSet[A]
     with SortedSet[A]
     with SortedSetOps[A, TreeSet, TreeSet[A]]
     with StrictOptimizedIterableOps[A, Set, TreeSet[A]]
-    with StrictOptimizedSortedSetOps[A, TreeSet, TreeSet[A]]
-    with Serializable {
+    with StrictOptimizedSortedSetOps[A, TreeSet, TreeSet[A]] {
 
   if (ordering eq null) throw new NullPointerException("ordering must not be null")
 
@@ -42,6 +39,8 @@ final class TreeSet[A] private (tree: RB.Tree[A, Unit])(implicit val ordering: O
   private def newSet(t: RB.Tree[A, Unit]) = new TreeSet[A](t)
 
   override def size: Int = RB.count(tree)
+
+  override def isEmpty = size == 0
 
   override def head: A = RB.smallest(tree).key
 
@@ -128,6 +127,8 @@ final class TreeSet[A] private (tree: RB.Tree[A, Unit])(implicit val ordering: O
   def excl(elem: A): TreeSet[A] =
     if (!RB.contains(tree, elem)) this
     else newSet(RB.delete(tree, elem))
+
+  override protected[this] def className = "TreeSet"
 }
 
 /**
@@ -136,6 +137,7 @@ final class TreeSet[A] private (tree: RB.Tree[A, Unit])(implicit val ordering: O
   *  @define Coll `immutable.TreeSet`
   *  @define coll immutable tree set
   */
+@SerialVersionUID(3L)
 object TreeSet extends SortedIterableFactory[TreeSet] {
 
   def empty[A: Ordering]: TreeSet[A] = new TreeSet[A]

@@ -1,10 +1,11 @@
 package scala.collection
 package mutable
 
+import java.io.{ObjectInputStream, ObjectOutputStream}
+
 import scala.runtime.ScalaRunTime
 import scala.reflect.ClassTag
 import scala.util.hashing.MurmurHash3
-
 import java.util.Arrays
 
 /**
@@ -14,7 +15,6 @@ import java.util.Arrays
   *  @tparam T    type of the elements in this wrapped array.
   *
   *  @author  Martin Odersky, Stephane Micheloud
-  *  @version 1.0
   *  @since 2.8
   *  @define Coll `ArraySeq`
   *  @define coll wrapped array
@@ -24,63 +24,74 @@ import java.util.Arrays
   *  @define willNotTerminateInf
   */
 @SerialVersionUID(3L)
-abstract class ArraySeq[T]
+sealed abstract class ArraySeq[T]
   extends AbstractSeq[T]
     with IndexedSeq[T]
     with IndexedSeqOps[T, ArraySeq, ArraySeq[T]]
-    with IndexedOptimizedSeq[T]
-    with StrictOptimizedSeqOps[T, ArraySeq, ArraySeq[T]]
-    with Serializable {
+    with StrictOptimizedSeqOps[T, ArraySeq, ArraySeq[T]] {
 
   override def iterableFactory: scala.collection.SeqFactory[ArraySeq] = ArraySeq.untagged
 
-  override protected def fromSpecificIterable(coll: scala.collection.Iterable[T]): ArraySeq[T] = {
-    val b = ArrayBuilder.make(elemTag)
+  override protected def fromSpecific(coll: scala.collection.IterableOnce[T]): ArraySeq[T] = {
+    val b = ArrayBuilder.make(elemTag).asInstanceOf[ArrayBuilder[T]]
     val s = coll.knownSize
     if(s > 0) b.sizeHint(s)
     b ++= coll
     ArraySeq.make(b.result())
   }
-  override protected def newSpecificBuilder: Builder[T, ArraySeq[T]] = ArraySeq.newBuilder(elemTag)
+  override protected def newSpecificBuilder: Builder[T, ArraySeq[T]] = ArraySeq.newBuilder(elemTag).asInstanceOf[Builder[T, ArraySeq[T]]]
 
-  /** The tag of the element type */
-  def elemTag: ClassTag[T]
+  /** The tag of the element type. This does not have to be equal to the element type of this ArraySeq. A primitive
+    * ArraySeq can be backed by an array of boxed values and a reference ArraySeq can be backed by an array of a supertype
+    * or subtype of the element type. */
+  def elemTag: ClassTag[_]
 
   /** Update element at given index */
-  def update(index: Int, elem: T): Unit
+  def update(@deprecatedName("idx", "2.13.0") index: Int, elem: T): Unit
 
-  /** The underlying array */
-  def array: Array[T]
+  /** The underlying array. Its element type does not have to be equal to the element type of this ArraySeq. A primitive
+    * ArraySeq can be backed by an array of boxed values and a reference ArraySeq can be backed by an array of a supertype
+    * or subtype of the element type. */
+  def array: Array[_]
 
-  override def toArray[U >: T : ClassTag]: Array[U] = {
-    val thatElementClass = implicitly[ClassTag[U]].runtimeClass
-    if (array.getClass.getComponentType eq thatElementClass)
-      array.asInstanceOf[Array[U]]
-    else
-      super.toArray[U]
-  }
-
-  override def className = "ArraySeq"
+  override protected[this] def stringPrefix = "ArraySeq"
 
   /** Clones this object, including the underlying Array. */
-  override def clone(): ArraySeq[T] = ArraySeq.make(array.clone())
+  override def clone(): ArraySeq[T] = ArraySeq.make(array.clone()).asInstanceOf[ArraySeq[T]]
 
-  override def copyToArray[B >: T](xs: Array[B], start: Int = 0): xs.type = copyToArray[B](xs, start, length)
+  override def copyToArray[B >: T](xs: Array[B], start: Int): Int = copyToArray[B](xs, start, length)
 
-  override def copyToArray[B >: T](xs: Array[B], start: Int, len: Int): xs.type = {
-    val l = scala.math.min(scala.math.min(len, length), xs.length-start)
-    if(l > 0) Array.copy(array, 0, xs, start, l)
-    xs
+  override def copyToArray[B >: T](xs: Array[B], start: Int, len: Int): Int = {
+    val copied = IterableOnce.elemsToCopyToArray(length, xs.length, start, len)
+    if(copied > 0) {
+      Array.copy(array, 0, xs, start, copied)
+    }
+    copied
+  }
+
+  override protected[this] def writeReplace(): AnyRef = this
+
+  override def equals(other: Any): Boolean = other match {
+    case that: ArraySeq[_] if this.array.length != that.array.length =>
+      false
+    case _ =>
+      super.equals(other)
+  }
+
+  override def sortInPlace[B >: T]()(implicit ord: Ordering[B]): this.type = {
+    if (length > 1) scala.util.Sorting.stableSort(array.asInstanceOf[Array[B]])
+    this
   }
 }
 
 /** A companion object used to create instances of `ArraySeq`.
   */
+@SerialVersionUID(3L)
 object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   val untagged: SeqFactory[ArraySeq] = new ClassTagSeqFactory.AnySeqDelegate(self)
 
   // This is reused for all calls to empty.
-  private val EmptyArraySeq  = new ofRef[AnyRef](new Array[AnyRef](0))
+  private[this] val EmptyArraySeq  = new ofRef[AnyRef](new Array[AnyRef](0))
   def empty[T : ClassTag]: ArraySeq[T] = EmptyArraySeq.asInstanceOf[ArraySeq[T]]
 
   def from[A : ClassTag](it: scala.collection.IterableOnce[A]): ArraySeq[A] = {
@@ -126,25 +137,28 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }).asInstanceOf[ArraySeq[T]]
 
   @SerialVersionUID(3L)
-  final class ofRef[T <: AnyRef](val array: Array[T]) extends ArraySeq[T] with Serializable {
+  final class ofRef[T <: AnyRef](val array: Array[T]) extends ArraySeq[T] {
     lazy val elemTag = ClassTag[T](array.getClass.getComponentType)
     def length: Int = array.length
-    def apply(index: Int): T = array(index).asInstanceOf[T]
+    def apply(index: Int): T = array(index)
     def update(index: Int, elem: T): Unit = { array(index) = elem }
     override def hashCode = MurmurHash3.arraySeqHash(array)
     override def equals(that: Any) = that match {
-      case that: ofRef[_] => Arrays.equals(array.asInstanceOf[Array[AnyRef]], that.array.asInstanceOf[Array[AnyRef]])
+      case that: ofRef[_] =>
+        Array.equals(
+          this.array.asInstanceOf[Array[AnyRef]],
+          that.array.asInstanceOf[Array[AnyRef]])
       case _ => super.equals(that)
     }
   }
 
   @SerialVersionUID(3L)
-  final class ofByte(val array: Array[Byte]) extends ArraySeq[Byte] with Serializable {
+  final class ofByte(val array: Array[Byte]) extends ArraySeq[Byte] {
     def elemTag = ClassTag.Byte
     def length: Int = array.length
     def apply(index: Int): Byte = array(index)
     def update(index: Int, elem: Byte): Unit = { array(index) = elem }
-    override def hashCode = MurmurHash3.byteArraySeqHash(array)
+    override def hashCode = MurmurHash3.arraySeqHash(array)
     override def equals(that: Any) = that match {
       case that: ofByte => Arrays.equals(array, that.array)
       case _ => super.equals(that)
@@ -152,7 +166,7 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }
 
   @SerialVersionUID(3L)
-  final class ofShort(val array: Array[Short]) extends ArraySeq[Short] with Serializable {
+  final class ofShort(val array: Array[Short]) extends ArraySeq[Short] {
     def elemTag = ClassTag.Short
     def length: Int = array.length
     def apply(index: Int): Short = array(index)
@@ -165,7 +179,7 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }
 
   @SerialVersionUID(3L)
-  final class ofChar(val array: Array[Char]) extends ArraySeq[Char] with Serializable {
+  final class ofChar(val array: Array[Char]) extends ArraySeq[Char] {
     def elemTag = ClassTag.Char
     def length: Int = array.length
     def apply(index: Int): Char = array(index)
@@ -175,10 +189,31 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
       case that: ofChar => Arrays.equals(array, that.array)
       case _ => super.equals(that)
     }
+
+    override def addString(sb: StringBuilder, start: String, sep: String, end: String): StringBuilder = {
+      val jsb = sb.underlying
+      if (start.length != 0) jsb.append(start)
+      val len = array.length
+      if (len != 0) {
+        if (sep.isEmpty) jsb.append(array)
+        else {
+          jsb.ensureCapacity(jsb.length + len + end.length + (len - 1) * sep.length)
+          jsb.append(array(0))
+          var i = 1
+          while (i < len) {
+            jsb.append(sep)
+            jsb.append(array(i))
+            i += i
+          }
+        }
+      }
+      if (end.length != 0) jsb.append(end)
+      sb
+    }
   }
 
   @SerialVersionUID(3L)
-  final class ofInt(val array: Array[Int]) extends ArraySeq[Int] with Serializable {
+  final class ofInt(val array: Array[Int]) extends ArraySeq[Int] {
     def elemTag = ClassTag.Int
     def length: Int = array.length
     def apply(index: Int): Int = array(index)
@@ -191,7 +226,7 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }
 
   @SerialVersionUID(3L)
-  final class ofLong(val array: Array[Long]) extends ArraySeq[Long] with Serializable {
+  final class ofLong(val array: Array[Long]) extends ArraySeq[Long] {
     def elemTag = ClassTag.Long
     def length: Int = array.length
     def apply(index: Int): Long = array(index)
@@ -204,7 +239,7 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }
 
   @SerialVersionUID(3L)
-  final class ofFloat(val array: Array[Float]) extends ArraySeq[Float] with Serializable {
+  final class ofFloat(val array: Array[Float]) extends ArraySeq[Float] {
     def elemTag = ClassTag.Float
     def length: Int = array.length
     def apply(index: Int): Float = array(index)
@@ -217,7 +252,7 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }
 
   @SerialVersionUID(3L)
-  final class ofDouble(val array: Array[Double]) extends ArraySeq[Double] with Serializable {
+  final class ofDouble(val array: Array[Double]) extends ArraySeq[Double] {
     def elemTag = ClassTag.Double
     def length: Int = array.length
     def apply(index: Int): Double = array(index)
@@ -230,7 +265,7 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }
 
   @SerialVersionUID(3L)
-  final class ofBoolean(val array: Array[Boolean]) extends ArraySeq[Boolean] with Serializable {
+  final class ofBoolean(val array: Array[Boolean]) extends ArraySeq[Boolean] {
     def elemTag = ClassTag.Boolean
     def length: Int = array.length
     def apply(index: Int): Boolean = array(index)
@@ -243,7 +278,7 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
   }
 
   @SerialVersionUID(3L)
-  final class ofUnit(val array: Array[Unit]) extends ArraySeq[Unit] with Serializable {
+  final class ofUnit(val array: Array[Unit]) extends ArraySeq[Unit] {
     def elemTag = ClassTag.Unit
     def length: Int = array.length
     def apply(index: Int): Unit = array(index)
@@ -254,4 +289,9 @@ object ArraySeq extends StrictOptimizedClassTagSeqFactory[ArraySeq] { self =>
       case _ => super.equals(that)
     }
   }
+
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
 }

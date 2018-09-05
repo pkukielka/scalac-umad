@@ -9,7 +9,6 @@ import scala.collection.{IterableOnce, SeqFactory, StrictOptimizedSeqFactory, St
   *  @tparam A    type of the elements contained in this stack.
   *
   *  @author  Pathikrit Bhowmick
-  *  @version 2.13
   *  @since   2.13
   *
   *  @define Coll `Stack`
@@ -19,19 +18,19 @@ import scala.collection.{IterableOnce, SeqFactory, StrictOptimizedSeqFactory, St
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 @migration("Stack is now based on an ArrayDeque instead of a linked list", "2.13.0")
 class Stack[A] protected (array: Array[AnyRef], start: Int, end: Int)
   extends ArrayDeque[A](array, start, end)
     with IndexedSeqOps[A, Stack, Stack[A]]
     with StrictOptimizedSeqOps[A, Stack, Stack[A]]
-    with Cloneable[Stack[A]]
-    with Serializable {
+    with Cloneable[Stack[A]] {
 
   def this(initialSize: Int = ArrayDeque.DefaultInitialSize) =
     this(ArrayDeque.alloc(initialSize), start = 0, end = 0)
 
   override def iterableFactory: SeqFactory[Stack] = Stack
+
+  override protected[this] def stringPrefix = "Stack"
 
   /**
     * Add elements to the top of this stack
@@ -113,6 +112,7 @@ class Stack[A] protected (array: Array[AnyRef], start: Int, end: Int)
   * @define coll stack
   * @define Coll `Stack`
   */
+@SerialVersionUID(3L)
 object Stack extends StrictOptimizedSeqFactory[Stack] {
 
   def from[A](source: IterableOnce[A]): Stack[A] = empty ++= source

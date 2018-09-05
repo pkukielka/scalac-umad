@@ -10,7 +10,8 @@ package scala
 package math
 
 import java.util.Comparator
-import scala.language.{implicitConversions, higherKinds}
+
+import scala.language.{higherKinds, implicitConversions}
 
 /** Ordering is a trait whose instances each represent a strategy for sorting
   * instances of a type.
@@ -61,7 +62,6 @@ import scala.language.{implicitConversions, higherKinds}
   * implicit orderings.
   *
   * @author Geoffrey Washburn
-  * @version 0.9.5, 2008-04-15
   * @since 2.7
   * @see [[scala.math.Ordered]], [[scala.util.Sorting]]
   */
@@ -100,10 +100,10 @@ trait Ordering[T] extends Comparator[T] with PartialOrdering[T] with Serializabl
   override def equiv(x: T, y: T): Boolean = compare(x, y) == 0
 
   /** Return `x` if `x` >= `y`, otherwise `y`. */
-  def max(x: T, y: T): T = if (gteq(x, y)) x else y
+  def max[U <: T](x: U, y: U): U = if (gteq(x, y)) x else y
 
   /** Return `x` if `x` <= `y`, otherwise `y`. */
-  def min(x: T, y: T): T = if (lteq(x, y)) x else y
+  def min[U <: T](x: U, y: U): U = if (lteq(x, y)) x else y
 
   /** Return the opposite ordering of this one. */
   override def reverse: Ordering[T] = new Ordering[T] {
@@ -114,8 +114,8 @@ trait Ordering[T] extends Comparator[T] with PartialOrdering[T] with Serializabl
     override def lt(x: T, y: T) = outer.lt(y, x)
     override def gt(x: T, y: T) = outer.gt(y, x)
     override def equiv(x: T, y: T) = outer.equiv(y, x)
-    override def max(x: T, y: T) = outer.min(x, y)
-    override def min(x: T, y: T) = outer.max(x, y)
+    override def max[U <: T](x: U, y: U) = outer.min(x, y)
+    override def min[U <: T](x: U, y: U) = outer.max(x, y)
   }
 
   /** Given f, a function from U into T, creates an Ordering[U] whose compare
@@ -173,7 +173,7 @@ trait Ordering[T] extends Comparator[T] with PartialOrdering[T] with Serializabl
   }
 
   /** This inner class defines comparison operators available for `T`. */
-  class Ops(lhs: T) {
+  class OrderingOps(lhs: T) {
     def <(rhs: T) = lt(lhs, rhs)
     def <=(rhs: T) = lteq(lhs, rhs)
     def >(rhs: T) = gt(lhs, rhs)
@@ -186,7 +186,7 @@ trait Ordering[T] extends Comparator[T] with PartialOrdering[T] with Serializabl
   /** This implicit method augments `T` with the comparison operators defined
     * in `scala.math.Ordering.Ops`.
     */
-  implicit def mkOrderingOps(lhs: T): Ops = new Ops(lhs)
+  implicit def mkOrderingOps(lhs: T): OrderingOps = new OrderingOps(lhs)
 }
 
 trait LowPriorityOrderingImplicits {
@@ -199,8 +199,8 @@ trait LowPriorityOrderingImplicits {
    *  turn up if nothing else works.  Since `Ordered[A]` extends
    *  `Comparable[A]` anyway, we can throw in some Java interop too.
    */
-  implicit def ordered[A: AsComparable]: Ordering[A] = new Ordering[A] {
-    def compare(x: A, y: A): Int = x compareTo y
+  implicit def ordered[A](implicit asComparable: AsComparable[A]): Ordering[A] = new Ordering[A] {
+    def compare(x: A, y: A): Int = asComparable(x).compareTo(y)
   }
 
   implicit def comparatorToOrdering[A](implicit cmp: Comparator[A]): Ordering[A] = new Ordering[A] {
@@ -243,7 +243,7 @@ object Ordering extends LowPriorityOrderingImplicits {
       * def lessThan[T: Ordering](x: T, y: T) = x < y
       * }}}
       */
-    implicit def infixOrderingOps[T](x: T)(implicit ord: Ordering[T]): Ordering[T]#Ops = new ord.Ops(x)
+    implicit def infixOrderingOps[T](x: T)(implicit ord: Ordering[T]): Ordering[T]#OrderingOps = new ord.OrderingOps(x)
   }
 
   /** An object containing implicits which are not in the default scope. */
@@ -312,31 +312,125 @@ object Ordering extends LowPriorityOrderingImplicits {
   }
   implicit object Long extends LongOrdering
 
-  trait FloatOrdering extends Ordering[Float] {
-    def compare(x: Float, y: Float) = java.lang.Float.compare(x, y)
+  /** `Ordering`s for `Float`s.
+    *
+    * @define floatOrdering Because the behaviour of `Float`s specified by IEEE is
+    *                       not consistent with a total ordering when dealing with
+    *                       `NaN`, there are two orderings defined for `Float`:
+    *                       `TotalOrdering`, which is consistent with a total
+    *                       ordering, and `IeeeOrdering`, which is consistent
+    *                       as much as possible with IEEE spec and floating point
+    *                       operations defined in [[scala.math]].
+    */
+  object Float {
+    /** An ordering for `Float`s which is a fully consistent total ordering,
+      * and treats `NaN` as larger than all other `Float` values; it behaves
+      * the same as [[java.lang.Float.compare()]].
+      *
+      * $floatOrdering
+      *
+      * This ordering may be preferable for sorting collections.
+      *
+      * @see [[IeeeOrdering]]
+      */
+    trait TotalOrdering extends Ordering[Float] {
+      def compare(x: Float, y: Float) = java.lang.Float.compare(x, y)
+    }
+    implicit object TotalOrdering extends TotalOrdering
 
-    override def lteq(x: Float, y: Float): Boolean = x <= y
-    override def gteq(x: Float, y: Float): Boolean = x >= y
-    override def lt(x: Float, y: Float): Boolean = x < y
-    override def gt(x: Float, y: Float): Boolean = x > y
-    override def equiv(x: Float, y: Float): Boolean = x == y
-    override def max(x: Float, y: Float): Float = math.max(x, y)
-    override def min(x: Float, y: Float): Float = math.min(x, y)
+    /** An ordering for `Float`s which is consistent with IEEE specifications
+      * whenever possible.
+      *
+      *   - `lt`, `lteq`, `equiv`, `gteq` and `gt` are consistent with primitive
+      * comparison operations for `Float`s, and return `false` when called with
+      * `NaN`.
+      *   - `min` and `max` are consistent with `math.min` and `math.max`, and
+      * return `NaN` when called with `NaN` as either argument.
+      *   - `compare` behaves the same as [[java.lang.Float.compare()]].
+      *
+      * $floatOrdering
+      *
+      * This ordering may be preferable for numeric contexts.
+      *
+      * @see [[TotalOrdering]]
+      */
+    trait IeeeOrdering extends Ordering[Float] {
+      def compare(x: Float, y: Float) = java.lang.Float.compare(x, y)
+
+      override def lteq(x: Float, y: Float): Boolean = x <= y
+      override def gteq(x: Float, y: Float): Boolean = x >= y
+      override def lt(x: Float, y: Float): Boolean = x < y
+      override def gt(x: Float, y: Float): Boolean = x > y
+      override def equiv(x: Float, y: Float): Boolean = x == y
+      override def max[U <: Float](x: U, y: U): U = math.max(x, y).asInstanceOf[U]
+      override def min[U <: Float](x: U, y: U): U = math.min(x, y).asInstanceOf[U]
+    }
+    implicit object IeeeOrdering extends IeeeOrdering
   }
-  implicit object Float extends FloatOrdering
+  @deprecated("There are multiple ways to order Floats (Ordering.Float.TotalOrdering, " +
+    "Ordering.Float.IeeeOrdering). Specify one by using a local import, assigning an implicit val, or passing it " +
+    "explicitly. See the documentation for details.", since = "2.13.0")
+  implicit object DeprecatedFloatOrdering extends Float.TotalOrdering
 
-  trait DoubleOrdering extends Ordering[Double] {
-    def compare(x: Double, y: Double) = java.lang.Double.compare(x, y)
+  /** `Ordering`s for `Double`s.
+    *
+    * @define doubleOrdering Because the behaviour of `Double`s specified by IEEE is
+    *                        not consistent with a total ordering when dealing with
+    *                        `NaN`, there are two orderings defined for `Double`:
+    *                        `TotalOrdering`, which is consistent with a total
+    *                        ordering, and `IeeeOrdering`, which is consistent
+    *                        as much as possible with IEEE spec and floating point
+    *                        operations defined in [[scala.math]].
+    */
+  object Double {
+    /** An ordering for `Double`s which is a fully consistent total ordering,
+      * and treats `NaN` as larger than all other `Double` values; it behaves
+      * the same as [[java.lang.Double.compare()]].
+      *
+      * $doubleOrdering
+      *
+      * This ordering may be preferable for sorting collections.
+      *
+      * @see [[IeeeOrdering]]
+      */
+    trait TotalOrdering extends Ordering[Double] {
+      def compare(x: Double, y: Double) = java.lang.Double.compare(x, y)
+    }
+    implicit object TotalOrdering extends TotalOrdering
 
-    override def lteq(x: Double, y: Double): Boolean = x <= y
-    override def gteq(x: Double, y: Double): Boolean = x >= y
-    override def lt(x: Double, y: Double): Boolean = x < y
-    override def gt(x: Double, y: Double): Boolean = x > y
-    override def equiv(x: Double, y: Double): Boolean = x == y
-    override def max(x: Double, y: Double): Double = math.max(x, y)
-    override def min(x: Double, y: Double): Double = math.min(x, y)
+    /** An ordering for `Double`s which is consistent with IEEE specifications
+      * whenever possible.
+      *
+      *   - `lt`, `lteq`, `equiv`, `gteq` and `gt` are consistent with primitive
+      * comparison operations for `Double`s, and return `false` when called with
+      * `NaN`.
+      *   - `min` and `max` are consistent with `math.min` and `math.max`, and
+      * return `NaN` when called with `NaN` as either argument.
+      *   - `compare` behaves the same as [[java.lang.Double.compare()]].
+      *
+      * $doubleOrdering
+      *
+      * This ordering may be preferable for numeric contexts.
+      *
+      * @see [[TotalOrdering]]
+      */
+    trait IeeeOrdering extends Ordering[Double] {
+      def compare(x: Double, y: Double) = java.lang.Double.compare(x, y)
+
+      override def lteq(x: Double, y: Double): Boolean = x <= y
+      override def gteq(x: Double, y: Double): Boolean = x >= y
+      override def lt(x: Double, y: Double): Boolean = x < y
+      override def gt(x: Double, y: Double): Boolean = x > y
+      override def equiv(x: Double, y: Double): Boolean = x == y
+      override def max[U <: Double](x: U, y: U): U = math.max(x, y).asInstanceOf[U]
+      override def min[U <: Double](x: U, y: U): U = math.min(x, y).asInstanceOf[U]
+    }
+    implicit object IeeeOrdering extends IeeeOrdering
   }
-  implicit object Double extends DoubleOrdering
+  @deprecated("There are multiple ways to order Doubles (Ordering.Double.TotalOrdering, " +
+    "Ordering.Double.IeeeOrdering). Specify one by using a local import, assigning an implicit val, or passing it " +
+    "explicitly. See the documentation for details.", since = "2.13.0")
+  implicit object DeprecatedDoubleOrdering extends Double.TotalOrdering
 
   trait BigIntOrdering extends Ordering[BigInt] {
     def compare(x: BigInt, y: BigInt) = x.compare(y)
@@ -352,6 +446,11 @@ object Ordering extends LowPriorityOrderingImplicits {
     def compare(x: String, y: String) = x.compareTo(y)
   }
   implicit object String extends StringOrdering
+
+  trait SymbolOrdering extends Ordering[Symbol] {
+    def compare(x: Symbol, y: Symbol): Int = x.name.compareTo(y.name)
+  }
+  implicit object Symbol extends SymbolOrdering
 
   trait OptionOrdering[T] extends Ordering[Option[T]] {
     def optionOrdering: Ordering[T]
@@ -385,9 +484,7 @@ object Ordering extends LowPriorityOrderingImplicits {
       def compare(x: (T1, T2), y: (T1, T2)): Int = {
         val compare1 = ord1.compare(x._1, y._1)
         if (compare1 != 0) return compare1
-        val compare2 = ord2.compare(x._2, y._2)
-        if (compare2 != 0) return compare2
-        0
+        ord2.compare(x._2, y._2)
       }
     }
 
@@ -398,9 +495,7 @@ object Ordering extends LowPriorityOrderingImplicits {
         if (compare1 != 0) return compare1
         val compare2 = ord2.compare(x._2, y._2)
         if (compare2 != 0) return compare2
-        val compare3 = ord3.compare(x._3, y._3)
-        if (compare3 != 0) return compare3
-        0
+        ord3.compare(x._3, y._3)
       }
     }
 
@@ -413,9 +508,7 @@ object Ordering extends LowPriorityOrderingImplicits {
         if (compare2 != 0) return compare2
         val compare3 = ord3.compare(x._3, y._3)
         if (compare3 != 0) return compare3
-        val compare4 = ord4.compare(x._4, y._4)
-        if (compare4 != 0) return compare4
-        0
+        ord4.compare(x._4, y._4)
       }
     }
 
@@ -430,9 +523,7 @@ object Ordering extends LowPriorityOrderingImplicits {
         if (compare3 != 0) return compare3
         val compare4 = ord4.compare(x._4, y._4)
         if (compare4 != 0) return compare4
-        val compare5 = ord5.compare(x._5, y._5)
-        if (compare5 != 0) return compare5
-        0
+        ord5.compare(x._5, y._5)
       }
     }
 
@@ -449,9 +540,7 @@ object Ordering extends LowPriorityOrderingImplicits {
         if (compare4 != 0) return compare4
         val compare5 = ord5.compare(x._5, y._5)
         if (compare5 != 0) return compare5
-        val compare6 = ord6.compare(x._6, y._6)
-        if (compare6 != 0) return compare6
-        0
+        ord6.compare(x._6, y._6)
       }
     }
 
@@ -470,9 +559,7 @@ object Ordering extends LowPriorityOrderingImplicits {
         if (compare5 != 0) return compare5
         val compare6 = ord6.compare(x._6, y._6)
         if (compare6 != 0) return compare6
-        val compare7 = ord7.compare(x._7, y._7)
-        if (compare7 != 0) return compare7
-        0
+        ord7.compare(x._7, y._7)
       }
     }
 
@@ -493,9 +580,7 @@ object Ordering extends LowPriorityOrderingImplicits {
         if (compare6 != 0) return compare6
         val compare7 = ord7.compare(x._7, y._7)
         if (compare7 != 0) return compare7
-        val compare8 = ord8.compare(x._8, y._8)
-        if (compare8 != 0) return compare8
-        0
+        ord8.compare(x._8, y._8)
       }
     }
 
@@ -518,9 +603,7 @@ object Ordering extends LowPriorityOrderingImplicits {
         if (compare7 != 0) return compare7
         val compare8 = ord8.compare(x._8, y._8)
         if (compare8 != 0) return compare8
-        val compare9 = ord9.compare(x._9, y._9)
-        if (compare9 != 0) return compare9
-        0
+        ord9.compare(x._9, y._9)
       }
     }
 

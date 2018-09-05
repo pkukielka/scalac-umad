@@ -9,7 +9,7 @@
 package scala
 package collection.mutable
 
-import collection.Iterator
+import collection.{AbstractIterator, Iterator}
 
 import java.lang.Integer.{numberOfLeadingZeros, rotateRight}
 import scala.util.hashing.byteswap32
@@ -31,7 +31,6 @@ import java.lang.Integer
  *
  *  @author  Matthias Zenger
  *  @author  Martin Odersky
- *  @version 2.0, 31/12/2006
  *  @since   1
  *
  *  @tparam A     type of the elements contained in this hash table.
@@ -205,7 +204,7 @@ private[mutable] abstract class HashTable[A, B, Entry >: Null <: HashEntry[A, En
 
   /** An iterator returning all entries.
    */
-  def entriesIterator: Iterator[Entry] = new Iterator[Entry] {
+  def entriesIterator: Iterator[Entry] = new AbstractIterator[Entry] {
     val iterTable = table
     var idx       = lastPopulatedIndex
     var es        = iterTable(idx)

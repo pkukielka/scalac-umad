@@ -9,7 +9,6 @@ package mutable
  *  @author  Matthias Zenger
  *  @author  Martin Odersky
  *  @author  Pavel Pavlov
- *  @version 2.0, 31/12/2006
  *  @since   1
  *
  *  @tparam A     the type of the elements contained in this set.
@@ -21,11 +20,10 @@ package mutable
  *  @define orderDependent
  *  @define orderDependentFold
  */
-@SerialVersionUID(3L)
 class LinkedHashSet[A]
   extends AbstractSet[A]
     with SetOps[A, LinkedHashSet, LinkedHashSet[A]]
-    with Serializable {
+    with StrictOptimizedIterableOps[A, LinkedHashSet, LinkedHashSet[A]] {
 
   override def iterableFactory: IterableFactory[LinkedHashSet] = LinkedHashSet
 
@@ -56,13 +54,9 @@ class LinkedHashSet[A]
       }
     }
 
-  def get(elem: A): Option[A] = {
-    val entry = table.findEntry(elem)
-    if (entry != null) Some(entry.key) else None
-  }
-
   override def size: Int = table.tableSize
-
+  override def knownSize: Int = size
+  override def isEmpty: Boolean = size == 0
   def contains(elem: A): Boolean = table.findEntry(elem) ne null
 
   def addOne(elem: A): this.type = {
@@ -89,8 +83,8 @@ class LinkedHashSet[A]
     }
   }
 
-  def iterator: Iterator[A] = new Iterator[A] {
-    private var cur = firstEntry
+  def iterator: Iterator[A] = new AbstractIterator[A] {
+    private[this] var cur = firstEntry
     def hasNext = cur ne null
     def next() =
       if (hasNext) { val res = cur.key; cur = cur.later; res }
@@ -121,12 +115,15 @@ class LinkedHashSet[A]
     table = newHashTable
     table.init(in, table.createNewEntry(in.readObject().asInstanceOf[A], null))
   }
+
+  override protected[this] def stringPrefix = "LinkedHashSet"
 }
 
 /** $factoryInfo
  *  @define Coll `LinkedHashSet`
  *  @define coll linked hash set
  */
+@SerialVersionUID(3L)
 object LinkedHashSet extends IterableFactory[LinkedHashSet] {
 
   override def empty[A]: LinkedHashSet[A] = new LinkedHashSet[A]
@@ -142,8 +139,7 @@ object LinkedHashSet extends IterableFactory[LinkedHashSet] {
   /** Class for the linked hash set entry, used internally.
    *  @since 2.10
    */
-  @SerialVersionUID(3L)
-  private[mutable] final class Entry[A](val key: A) extends HashEntry[A, Entry[A]] with Serializable {
+  private[mutable] final class Entry[A](val key: A) extends HashEntry[A, Entry[A]] {
     var earlier: Entry[A] = null
     var later: Entry[A] = null
   }

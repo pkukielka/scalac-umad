@@ -37,8 +37,15 @@ class Random(val self: java.util.Random) extends AnyRef with Serializable {
   /** Generates random bytes and places them into a user-supplied byte
    *  array.
    */
-  def nextBytes(bytes: Array[Byte]) { self.nextBytes(bytes) }
-
+  def nextBytes(bytes: Array[Byte]): Unit = { self.nextBytes(bytes) }
+  
+  /** Generates `n` random bytes and returns them in a new array. */
+  def nextBytes(n: Int): Array[Byte] = {
+    val bytes = new Array[Byte](0 max n)
+    self.nextBytes(bytes)
+    bytes
+  }
+  
   /** Returns the next pseudorandom, uniformly distributed double value
    *  between 0.0 and 1.0 from this random number generator's sequence.
    */
@@ -198,7 +205,7 @@ class Random(val self: java.util.Random) extends AnyRef with Serializable {
     (self.nextInt(high - low) + low).toChar
   }
 
-  def setSeed(seed: Long) { self.setSeed(seed) }
+  def setSeed(seed: Long): Unit = { self.setSeed(seed) }
 
   /** Returns a new collection of the same type in a randomly chosen order.
    *
@@ -207,7 +214,7 @@ class Random(val self: java.util.Random) extends AnyRef with Serializable {
   def shuffle[T, CC[X] <: IterableOnce[X]](xs: CC[T])(implicit bf: BuildFrom[CC[T], T, CC[T]]): CC[T] = {
     val buf = new ArrayBuffer[T] ++= xs
 
-    def swap(i1: Int, i2: Int) {
+    def swap(i1: Int, i2: Int): Unit = {
       val tmp = buf(i1)
       buf(i1) = buf(i2)
       buf(i2) = tmp

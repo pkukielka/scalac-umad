@@ -50,7 +50,7 @@ package scala
  *
  *
  *  @author  Martin Odersky, Pavel Pavlov, Adriaan Moors
- *  @version 1.0, 16/07/2003
+ *  @since   1.0
  */
 trait PartialFunction[-A, +B] extends (A => B) { self =>
   import PartialFunction._
@@ -241,6 +241,13 @@ object PartialFunction {
     case lf: Lifted[A, B] => lf.pf
     case ff => new Unlifted(ff)
   }
+
+  /**  Converts an ordinary function to a partial function. Note that calling `isDefinedAt(x)` on 
+   *   this partial function will return `true` for every `x`.
+   *   @param  f  an ordinary function
+   *   @return    a partial function which delegates to the ordinary function `f`
+   */
+  def fromFunction[A, B](f: A => B): PartialFunction[A, B] = { case x => f(x) }
 
   private[this] val constFalse: Any => Boolean = { _ => false}
 

@@ -59,12 +59,14 @@ private[collection] trait Wrappers {
   case class JIterableWrapper[A](underlying: jl.Iterable[A]) extends AbstractIterable[A] {
     def iterator = underlying.iterator.asScala
     override def iterableFactory = mutable.ArrayBuffer
+    override def isEmpty: Boolean = !underlying.iterator().hasNext
   }
 
   @SerialVersionUID(3L)
   case class JCollectionWrapper[A](underlying: ju.Collection[A]) extends AbstractIterable[A] {
     def iterator = underlying.iterator.asScala
     override def size = underlying.size
+    override def knownSize: Int = if (underlying.isEmpty) 0 else super.knownSize
     override def isEmpty = underlying.isEmpty
     override def iterableFactory = mutable.ArrayBuffer
   }
@@ -95,6 +97,7 @@ private[collection] trait Wrappers {
   @SerialVersionUID(3L)
   case class JListWrapper[A](underlying: ju.List[A]) extends mutable.AbstractBuffer[A] with SeqOps[A, mutable.Buffer, mutable.Buffer[A]] {
     def length = underlying.size
+    override def knownSize: Int = if (underlying.isEmpty) 0 else super.knownSize
     override def isEmpty = underlying.isEmpty
     override def iterator: Iterator[A] = underlying.iterator.asScala
     def apply(i: Int) = underlying.get(i)
@@ -139,7 +142,7 @@ private[collection] trait Wrappers {
       this
     }
     override def iterableFactory = mutable.ArrayBuffer
-    def subtractOne(elem: A): this.type = { underlying.remove(elem.asInstanceOf[AnyRef]); this }
+    override def subtractOne(elem: A): this.type = { underlying.remove(elem.asInstanceOf[AnyRef]); this }
   }
 
   @SerialVersionUID(3L)
@@ -188,7 +191,8 @@ private[collection] trait Wrappers {
   case class JSetWrapper[A](underlying: ju.Set[A]) extends mutable.AbstractSet[A] with mutable.SetOps[A, mutable.Set, mutable.Set[A]] {
 
     override def size = underlying.size
-
+    override def isEmpty: Boolean = underlying.isEmpty
+    override def knownSize: Int = if (underlying.isEmpty) 0 else super.knownSize
     def iterator = underlying.iterator.asScala
 
     def contains(elem: A): Boolean = underlying.contains(elem)
@@ -198,9 +202,6 @@ private[collection] trait Wrappers {
 
     override def remove(elem: A): Boolean = underlying remove elem
     override def clear() = underlying.clear()
-
-    //TODO Should Set.get be supported? There is no efficient way to return the canonical element from a Java Set
-    def get(elem: A): Option[A] = if(underlying.contains(elem)) Some(elem) else None
 
     override def empty = JSetWrapper(new ju.HashSet[A])
     // Note: Clone cannot just call underlying.clone because in Java, only specific collections
@@ -237,7 +238,6 @@ private[collection] trait Wrappers {
           val (k, v) = ui.next()
           prev = Some(k)
           new ju.Map.Entry[A, B] {
-            import scala.util.hashing.byteswap32
             def getKey = k
             def getValue = v
             def setValue(v1 : B) = self.put(k, v1)
@@ -304,6 +304,7 @@ private[collection] trait Wrappers {
     override def clear() = underlying.clear()
   }
 
+  @SerialVersionUID(3L)
   abstract class AbstractJMapWrapper[K, V]
     extends mutable.AbstractMap[K, V]
       with JMapWrapperLike[K, V, mutable.Map, mutable.Map[K, V]]
@@ -353,8 +354,10 @@ private[collection] trait Wrappers {
     */
   @SerialVersionUID(3L)
   class JMapWrapper[A, B](val underlying : ju.Map[A, B])
-    extends AbstractJMapWrapper[A, B]
-    with Serializable {
+    extends AbstractJMapWrapper[A, B] {
+
+    override def isEmpty: Boolean = underlying.isEmpty
+    override def knownSize: Int = if (underlying.isEmpty) 0 else super.knownSize
     override def empty = new JMapWrapper(new ju.HashMap[A, B])
   }
 
@@ -392,6 +395,8 @@ private[collection] trait Wrappers {
 
     override def get(k: A) = Option(underlying get k)
 
+    override def isEmpty: Boolean = underlying.isEmpty
+    override def knownSize: Int = if (underlying.isEmpty) 0 else super.knownSize
     override def empty = new JConcurrentMapWrapper(new juc.ConcurrentHashMap[A, B])
 
     def putIfAbsent(k: A, v: B): Option[B] = Option(underlying.putIfAbsent(k, v))
@@ -435,6 +440,8 @@ private[collection] trait Wrappers {
   @SerialVersionUID(3L)
   case class JDictionaryWrapper[A, B](underlying: ju.Dictionary[A, B]) extends mutable.AbstractMap[A, B] {
     override def size: Int = underlying.size
+    override def isEmpty: Boolean = underlying.isEmpty
+    override def knownSize: Int = if (underlying.isEmpty) 0 else super.knownSize
 
     def get(k: A) = Option(underlying get k)
 
@@ -446,10 +453,9 @@ private[collection] trait Wrappers {
     override def update(k: A, v: B): Unit = { underlying.put(k, v) }
 
     override def remove(k: A): Option[B] = Option(underlying remove k)
-
     def iterator = enumerationAsScalaIterator(underlying.keys) map (k => (k, underlying get k))
 
-    def clear() = iterator.foreach(entry => underlying.remove(entry._1))
+    override def clear() = iterator.foreach(entry => underlying.remove(entry._1))
 
     override def mapFactory = mutable.HashMap
   }
@@ -459,7 +465,8 @@ private[collection] trait Wrappers {
             with mutable.MapOps[String, String, mutable.Map, mutable.Map[String, String]] {
 
     override def size = underlying.size
-
+    override def isEmpty: Boolean = underlying.isEmpty
+    override def knownSize: Int = size
     def get(k: String) = {
       val v = underlying get k
       if (v != null) Some(v.asInstanceOf[String]) else None

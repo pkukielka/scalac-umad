@@ -1,10 +1,8 @@
 package scala.collection.immutable
 
-import scala.collection.{SeqFactory, IterableFactory, IterableOnce, Iterator, StrictOptimizedIterableOps}
+import scala.collection.{AbstractIterator, Iterator}
 
 import java.lang.String
-
-import scala.collection.mutable.Builder
 
 /** `NumericRange` is a more generic version of the
   *  `Range` class which works with arbitrary types.
@@ -16,7 +14,7 @@ import scala.collection.mutable.Builder
   *  the `Int`-based `scala.Range` should be more performant.
   *
   *  {{{
-  *     val r1 = new Range(0, 100, 1)
+  *     val r1 = Range(0, 100, 1)
   *     val veryBig = Int.MaxValue.toLong + 1
   *     val r2 = Range.Long(veryBig, veryBig + 100, 1)
   *     assert(r1 sameElements r2.map(_ - veryBig))
@@ -39,25 +37,9 @@ sealed class NumericRange[T](
   extends AbstractSeq[T]
     with IndexedSeq[T]
     with IndexedSeqOps[T, IndexedSeq, IndexedSeq[T]]
-    with StrictOptimizedSeqOps[T, IndexedSeq, IndexedSeq[T]]
-    with Serializable { self =>
+    with StrictOptimizedSeqOps[T, IndexedSeq, IndexedSeq[T]] { self =>
 
-  override def iterator = new Iterator[T] {
-    import num.mkNumericOps
-
-    private var _hasNext = !self.isEmpty
-    private var _next: T = start
-    private val lastElement: T = if (_hasNext) last else start
-    override def knownSize: Int = if (_hasNext) num.toInt((lastElement - _next) / step) + 1 else 0
-    def hasNext: Boolean = _hasNext
-    def next(): T = {
-      if (!_hasNext) Iterator.empty.next()
-      val value = _next
-      _hasNext = value != lastElement
-      _next = num.plus(value, step)
-      value
-    }
-  }
+  override def iterator: Iterator[T] = new NumericRange.NumericRangeIterator(this, num)
 
   /** Note that NumericRange must be invariant so that constructs
     *  such as "1L to 10 by 5" do not infer the range type as AnyVal.
@@ -191,7 +173,7 @@ sealed class NumericRange[T](
     // XXX This may be incomplete.
     new NumericRange[A](fm(start), fm(end), fm(step), isInclusive) {
 
-      private lazy val underlyingRange: NumericRange[T] = self
+      private[this] lazy val underlyingRange: NumericRange[T] = self
       override def foreach[@specialized(Unit) U](f: A => U): Unit = { underlyingRange foreach (x => f(fm(x))) }
       override def isEmpty = underlyingRange.isEmpty
       override def apply(idx: Int): A = fm(underlyingRange(idx))
@@ -242,18 +224,6 @@ sealed class NumericRange[T](
           }
         ans.asInstanceOf[B]
       }
-      else if ((num eq scala.math.Numeric.FloatAsIfIntegral) ||
-        (num eq scala.math.Numeric.DoubleAsIfIntegral)) {
-        // Try to compute sum with reasonable accuracy, avoiding over/underflow
-        val numAsIntegral = num.asInstanceOf[Integral[B]]
-        import numAsIntegral._
-        val a = math.abs(head.toDouble)
-        val b = math.abs(last.toDouble)
-        val two = num fromInt 2
-        val nre = num fromInt size
-        if (a > 1e38 || b > 1e38) nre * ((head / two) + (last / two))  // Compute in parts to avoid Infinity if possible
-        else (nre / two) * (head + last)    // Don't need to worry about infinity; this will be more accurate and avoid underflow
-      }
       else if ((num eq scala.math.Numeric.BigIntIsIntegral) ||
         (num eq scala.math.Numeric.BigDecimalIsFractional)) {
         // No overflow, so we can use arithmetic series formula directly
@@ -297,6 +267,10 @@ sealed class NumericRange[T](
     val stepped = if (step == 1) "" else s" by $step"
     s"${empty}NumericRange $start $preposition $end$stepped"
   }
+
+  override protected[this] def writeReplace(): AnyRef = this
+
+  override protected[this] def className = "NumericRange"
 }
 
 /** A companion object for numeric ranges.
@@ -424,9 +398,24 @@ object NumericRange {
     Numeric.ByteIsIntegral -> Ordering.Byte,
     Numeric.CharIsIntegral -> Ordering.Char,
     Numeric.LongIsIntegral -> Ordering.Long,
-    Numeric.FloatAsIfIntegral -> Ordering.Float,
-    Numeric.DoubleAsIfIntegral -> Ordering.Double,
     Numeric.BigDecimalAsIfIntegral -> Ordering.BigDecimal
   )
 
+  @SerialVersionUID(3L)
+  private final class NumericRangeIterator[T](self: NumericRange[T], num: Integral[T]) extends AbstractIterator[T] with Serializable {
+    import num.mkNumericOps
+
+    private[this] var _hasNext = !self.isEmpty
+    private[this] var _next: T = self.start
+    private[this] val lastElement: T = if (_hasNext) self.last else self.start
+    override def knownSize: Int = if (_hasNext) num.toInt((lastElement - _next) / self.step) + 1 else 0
+    def hasNext: Boolean = _hasNext
+    def next(): T = {
+      if (!_hasNext) Iterator.empty.next()
+      val value = _next
+      _hasNext = value != lastElement
+      _next = num.plus(value, self.step)
+      value
+    }
+  }
 }

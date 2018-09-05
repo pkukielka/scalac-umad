@@ -46,7 +46,7 @@ public class AccessMonitorRewriter extends MethodRewriter {
 
     private static final ThreadLocal<Collection<Integer>> locks = ThreadLocal.withInitial(LinkedList::new);
 
-    private static final int STACK_TRACE_LENGTH = 10;
+    private static final int strackTraceLength = conf.getMonitorConfig().getInt("stackTraceLength");
 
     private static final int realStackStartIndex = 3;
 
@@ -175,7 +175,7 @@ public class AccessMonitorRewriter extends MethodRewriter {
                     position));
 
             str.append(thread.getName()).append(" stack trace:\n");
-            int currentStackTraceIndexEnd = Math.min(realStackStartIndex + STACK_TRACE_LENGTH, stackTrace.length);
+            int currentStackTraceIndexEnd = Math.min(realStackStartIndex + strackTraceLength, stackTrace.length);
             for (int i = realStackStartIndex; i < currentStackTraceIndexEnd; i++) {
                 str.append("    ").append(stackTrace[i].toString()).append("\n");
             }

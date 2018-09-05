@@ -33,7 +33,7 @@ import scala.collection.mutable.ListBuffer
  *  Future versions of this trait will no longer extend `DelayedInit`.
  *
  *  @author  Martin Odersky
- *  @version 2.1, 15/02/2011
+ *  @since   2.1
  */
 trait App extends DelayedInit {
 
@@ -45,9 +45,9 @@ trait App extends DelayedInit {
    */
   protected final def args: Array[String] = _args
 
-  private var _args: Array[String] = _
+  private[this] var _args: Array[String] = _
 
-  private val initCode = new ListBuffer[() => Unit]
+  private[this] val initCode = new ListBuffer[() => Unit]
 
   /** The init hook. This saves all initialization code for execution within `main`.
    *  This method is normally never called directly from user code.
@@ -57,7 +57,7 @@ trait App extends DelayedInit {
    *  @param body the initialization code to be stored for later execution
    */
   @deprecated("the delayedInit mechanism will disappear", "2.11.0")
-  override def delayedInit(body: => Unit) {
+  override def delayedInit(body: => Unit): Unit = {
     initCode += (() => body)
   }
 

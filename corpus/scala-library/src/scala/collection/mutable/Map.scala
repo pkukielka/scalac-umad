@@ -2,7 +2,6 @@ package scala
 package collection
 package mutable
 
-import scala.collection.{IterableOnce, MapFactory}
 import scala.language.higherKinds
 
 /** Base type of mutable Maps */
@@ -56,8 +55,19 @@ trait MapOps[K, V, +CC[X, Y] <: MapOps[X, Y, CC, _], +C <: MapOps[K, V, CC, C]]
   extends IterableOps[(K, V), Iterable, C]
     with collection.MapOps[K, V, CC, C]
     with Cloneable[C]
+    with Builder[(K, V), C]
     with Growable[(K, V)]
     with Shrinkable[K] {
+
+  def result(): C = coll
+
+  @deprecated("Use - or remove on an immutable Map", "2.13.0")
+  @deprecatedOverriding("This method should be final, but is not due to scala/bug#10853", "2.13.0")
+  /*final*/ def - (key: K): C = clone() -= key
+
+  @deprecated("Use -- or removeAll on an immutable Map", "2.13.0")
+  @deprecatedOverriding("This method should be final, but is not due to scala/bug#10853", "2.13.0")
+  /*final*/ def - (key1: K, key2: K, keys: K*): C = clone() -= key1 -= key2 --= keys
 
   /** Adds a new key/value pair to this map and optionally returns previously bound value.
     *  If the map already contains a
@@ -116,52 +126,45 @@ trait MapOps[K, V, +CC[X, Y] <: MapOps[X, Y, CC, _], +C <: MapOps[K, V, CC, C]]
     r
   }
 
+  def clear(): Unit = { keysIterator foreach -= }
+
   override def clone(): C = empty ++= toIterable
 
-  def mapInPlace(f: ((K, V)) => (K, V)): this.type = {
-    val toAdd = Map[K, V]()
-    for (elem <- this) {
-        toAdd += f(elem)
-    }
-    coll.clear()
-    coll ++= toAdd
-    this
-  }
-
-  def flatMapInPlace(f: ((K, V)) => IterableOnce[(K, V)]): this.type = {
-    val toAdd = Map[K, V]()
-    val toKeep = Map[K, V]()
-    for (elem <- this) {
-      for ((k,v) <- f(elem).iterator){
-        if (contains(k) && this(k) == v) {
-          toKeep += ((k,v)) 
-        } else {
-          toAdd += ((k,v)) 
-        }
-      }
-    }
-    coll.clear()
-    coll ++= toKeep
-    coll ++= toAdd
-    this
-  }
-
-  def filterInPlace(p: ((K, V)) => Boolean): this.type = {
-    val toRemove = Set[K]()
-    for (elem <- this)
-      if (!p(elem)) toRemove += elem._1
-    for (elem <- toRemove)
-      coll -= elem
-    this
-  }
+  @deprecated("Use filterInPlace instead", "2.13.0")
+  @inline final def retain(p: (K, V) => Boolean): this.type = filterInPlace(p)
 
   /** Retains only those mappings for which the predicate
     *  `p` returns `true`.
     *
     * @param p  The test predicate
     */
-  @deprecated("Use .filterInPlace instead of .retain", "2.13.0")
-  @`inline` final def retain(p: (K, V) => Boolean): this.type = filterInPlace(p.tupled)
+  def filterInPlace(p: (K, V) => Boolean): this.type = {
+    for ((k, v) <- this.toList) // scala/bug#7269 toList avoids ConcurrentModificationException
+      if (!p(k, v)) this -= k
+
+    this
+  }
+
+  @deprecated("Use mapValuesInPlace instead", "2.13.0")
+  @inline final def transform(f: (K, V) => V): this.type = mapValuesInPlace(f)
+
+  /** Applies a transformation function to all values contained in this map.
+    * The transformation function produces new values from existing keys
+    * associated values.
+    *
+    * @param f  the transformation to apply
+    * @return   the map itself.
+    */
+  def mapValuesInPlace(f: (K, V) => V): this.type = {
+    iterator foreach {
+      case (key, value) => update(key, f(key, value))
+    }
+    this
+  }
+
+  @deprecated("Use m.clone().addOne((k,v)) instead of m.updated(k, v)", "2.13.0")
+  def updated[V1 >: V](key: K, value: V1): CC[K, V1] =
+    clone().asInstanceOf[CC[K, V1]].addOne((key, value))
 }
 
 /**
@@ -169,21 +172,21 @@ trait MapOps[K, V, +CC[X, Y] <: MapOps[X, Y, CC, _], +C <: MapOps[K, V, CC, C]]
   * @define coll mutable map
   * @define Coll `mutable.Map`
   */
+@SerialVersionUID(3L)
 object Map extends MapFactory.Delegate[Map](HashMap) {
 
-  @SerialVersionUID(3L)
   class WithDefault[K, V](val underlying: Map[K, V], val defaultValue: K => V)
     extends AbstractMap[K, V]
-      with MapOps[K, V, Map, WithDefault[K, V]]
-      with Serializable {
+      with MapOps[K, V, Map, WithDefault[K, V]] {
 
     override def default(key: K): V = defaultValue(key)
 
     def iterator: scala.collection.Iterator[(K, V)] = underlying.iterator
-
+    override def isEmpty: Boolean = underlying.isEmpty
+    override def knownSize: Int = underlying.knownSize
     override def mapFactory: MapFactory[Map] = underlying.mapFactory
 
-    def clear(): Unit = underlying.clear()
+    override def clear(): Unit = underlying.clear()
 
     def get(key: K): Option[V] = underlying.get(key)
 
@@ -191,9 +194,12 @@ object Map extends MapFactory.Delegate[Map](HashMap) {
 
     def addOne(elem: (K, V)): WithDefault.this.type = { underlying.addOne(elem); this }
 
+    override def concat[V2 >: V](suffix: collection.IterableOnce[(K, V2)]): WithDefault[K, V2] =
+      underlying.concat(suffix).withDefault(defaultValue)
+
     override def empty: WithDefault[K, V] = new WithDefault[K, V](underlying.empty, defaultValue)
 
-    override protected def fromSpecificIterable(coll: scala.collection.Iterable[(K, V)]): WithDefault[K, V] =
+    override protected def fromSpecific(coll: scala.collection.IterableOnce[(K, V)]): WithDefault[K, V] =
       new WithDefault[K, V](mapFactory.from(coll), defaultValue)
 
     override protected def newSpecificBuilder: Builder[(K, V), WithDefault[K, V]] =
@@ -203,4 +209,5 @@ object Map extends MapFactory.Delegate[Map](HashMap) {
 }
 
 /** Explicit instantiation of the `Map` trait to reduce class file size in subclasses. */
+@SerialVersionUID(3L)
 abstract class AbstractMap[K, V] extends scala.collection.AbstractMap[K, V] with Map[K, V]

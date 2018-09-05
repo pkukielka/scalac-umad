@@ -190,7 +190,6 @@ import java.util.regex.{ Pattern, Matcher }
  *  @author  Thibaud Hottelier
  *  @author  Philipp Haller
  *  @author  Martin Odersky
- *  @version 1.1, 29/01/2008
  *
  *  @param pattern    The compiled pattern
  *  @param groupNames A mapping from names to indices in capture groups
@@ -280,10 +279,8 @@ class Regex private[matching](val pattern: Pattern, groupNames: String*) extends
    *  @param  s     The string to match
    *  @return       The matches
    */
-  def unapplySeq(s: CharSequence): Option[List[String]] = s match {
-    case null => None
-    case _    =>
-      val m = pattern matcher s
+  def unapplySeq(s: CharSequence): Option[List[String]] = {
+    val m = pattern matcher s
       if (runMatcher(m)) Some(List.tabulate(m.groupCount) { i => m.group(i + 1) })
       else None
   }
@@ -337,7 +334,7 @@ class Regex private[matching](val pattern: Pattern, groupNames: String*) extends
    *  and the result of that match is used.
    */
   def unapplySeq(m: Match): Option[List[String]] =
-    if (m == null || m.matched == null) None
+    if (m.matched == null) None
     else if (m.matcher.pattern == this.pattern) Regex.extractGroupsFromMatch(m)
     else unapplySeq(m.matched)
 
@@ -394,9 +391,9 @@ class Regex private[matching](val pattern: Pattern, groupNames: String*) extends
    */
   def findAllMatchIn(source: CharSequence): Iterator[Match] = {
     val matchIterator = findAllIn(source)
-    new Iterator[Match] {
+    new AbstractIterator[Match] {
       def hasNext = matchIterator.hasNext
-      def next: Match = {
+      def next(): Match = {
         matchIterator.next()
         new Match(matchIterator.source, matchIterator.matcher, matchIterator.groupNames).force
       }
@@ -689,7 +686,7 @@ object Regex {
       if (end(i) >= 0) source.subSequence(end(i), source.length)
       else null
 
-    private lazy val nameToIndex: Map[String, Int] = Map[String, Int]() ++ ("" :: groupNames.toList).zipWithIndex
+    private[this] lazy val nameToIndex: Map[String, Int] = Map[String, Int]() ++ ("" :: groupNames.toList).zipWithIndex
 
     /** Returns the group with the given name.
      *
@@ -729,9 +726,9 @@ object Regex {
     /** The number of subgroups. */
     def groupCount = matcher.groupCount
 
-    private lazy val starts: Array[Int] =
+    private[this] lazy val starts: Array[Int] =
       Array.tabulate(groupCount + 1) { matcher.start }
-    private lazy val ends: Array[Int] =
+    private[this] lazy val ends: Array[Int] =
       Array.tabulate(groupCount + 1) { matcher.end }
 
     /** The index of the first matched character in group `i`. */
@@ -857,14 +854,14 @@ object Regex {
     /** Convert to an iterator that yields MatchData elements instead of Strings. */
     def matchData: Iterator[Match] = new AbstractIterator[Match] {
       def hasNext = self.hasNext
-      def next = { self.next(); new Match(source, matcher, groupNames).force }
+      def next() = { self.next(); new Match(source, matcher, groupNames).force }
     }
 
     /** Convert to an iterator that yields MatchData elements instead of Strings and has replacement support. */
     private[matching] def replacementData = new AbstractIterator[Match] with Replacement {
       def matcher = self.matcher
       def hasNext = self.hasNext
-      def next = { self.next(); new Match(source, matcher, groupNames).force }
+      def next() = { self.next(); new Match(source, matcher, groupNames).force }
     }
   }
 
@@ -875,7 +872,7 @@ object Regex {
   private[matching] trait Replacement {
     protected def matcher: Matcher
 
-    private val sb = new java.lang.StringBuffer
+    private[this] val sb = new java.lang.StringBuffer
 
     def replaced = {
       val newsb = new java.lang.StringBuffer(sb)

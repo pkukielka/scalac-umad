@@ -15,7 +15,6 @@ package mutable
   *
   *  @author  Pathikrit Bhowmick
   *
-  *  @version 2.13
   *  @since   2.13
   *
   *  @define Coll `mutable.Queue`
@@ -25,18 +24,18 @@ package mutable
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 class Queue[A] protected (array: Array[AnyRef], start: Int, end: Int)
   extends ArrayDeque[A](array, start, end)
     with IndexedSeqOps[A, Queue, Queue[A]]
     with StrictOptimizedSeqOps[A, Queue, Queue[A]]
-    with Cloneable[Queue[A]]
-    with Serializable {
+    with Cloneable[Queue[A]] {
 
   def this(initialSize: Int = ArrayDeque.DefaultInitialSize) =
     this(ArrayDeque.alloc(initialSize), start = 0, end = 0)
 
   override def iterableFactory: SeqFactory[Queue] = Queue
+
+  override protected[this] def stringPrefix = "Queue"
 
   /**
     * Add elements to the end of this queue
@@ -77,41 +76,25 @@ class Queue[A] protected (array: Array[AnyRef], start: Int, end: Int)
     *  @return the first element of the queue for which p yields true
     */
   def dequeueFirst(p: A => Boolean): Option[A] =
-    if (isEmpty) None
-    else if (p(head)) {
-      val res = Some(head)
-      removeHead()
-      res
-    } else {
-      val i = indexWhere(p)
-      if (i < 0) None
-      else Some(remove(i))
-    }
+    removeFirst(p)
 
-   /** Returns all elements in the queue which satisfy the
-   *  given predicate, and removes those elements from the queue.
-   *
-   *  @param p   the predicate used for choosing elements
-   *  @return    a sequence of all elements in the queue for which
-   *             p yields true.
-   */
-  def dequeueAll(p: A => Boolean): scala.collection.immutable.Seq[A] = {
-    val res = scala.collection.immutable.Seq.newBuilder[A]
-    var i, j = 0
-    while (i < size) {
-      if (p(apply(i))) {
-        res += this(i)
-      } else {
-        if (i != j) {
-          this(j) = this(i)
-        }
-        j += 1
-      }
-      i += 1
-    }
-    if (i != j) takeInPlace(j)
-    res.result()
-  }
+  /** Returns all elements in the queue which satisfy the
+    *  given predicate, and removes those elements from the queue.
+    *
+    *  @param p   the predicate used for choosing elements
+    *  @return    a sequence of all elements in the queue for which
+    *             p yields true.
+    */
+  def dequeueAll(p: A => Boolean): scala.collection.immutable.Seq[A] =
+    removeAll(p)
+
+  /**
+    * Returns and dequeues all elements from the queue which satisfy the given predicate
+    *
+    *  @param f   the predicate used for choosing elements
+    *  @return The removed elements
+    */
+  def dequeueWhile(f: A => Boolean): scala.collection.Seq[A] = removeHeadWhile(f)
 
   /** Returns the first element in the queue, or throws an error if there
     *  is no element contained in the queue.
@@ -136,6 +119,7 @@ class Queue[A] protected (array: Array[AnyRef], start: Int, end: Int)
   * @define coll queue
   * @define Coll `Queue`
   */
+@SerialVersionUID(3L)
 object Queue extends StrictOptimizedSeqFactory[Queue] {
 
   def from[A](source: IterableOnce[A]): Queue[A] = empty ++= source

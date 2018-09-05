@@ -24,16 +24,17 @@ import scala.collection.immutable.List
   *  @define orderDependent
   *  @define orderDependentFold
   */
+@deprecated("Use an immutable.ListMap assigned to a var instead of mutable.ListMap", "2.13.0")
 class ListMap[K, V]
   extends AbstractMap[K, V]
     with MapOps[K, V, ListMap, ListMap[K, V]]
     with StrictOptimizedIterableOps[(K, V), Iterable, ListMap[K, V]]
-    with Serializable {
+    with StrictOptimizedMapOps[K, V, ListMap, ListMap[K, V]] {
 
   override def mapFactory: MapFactory[ListMap] = ListMap
 
-  private var elems: List[(K, V)] = List()
-  private var siz: Int = 0
+  private[this] var elems: List[(K, V)] = List()
+  private[this] var siz: Int = 0
 
   def get(key: K): Option[V] = elems find (_._1 == key) map (_._2)
   def iterator: Iterator[(K, V)] = elems.iterator
@@ -52,12 +53,17 @@ class ListMap[K, V]
   final override def clear(): Unit = { elems = List(); siz = 0 }
 
   final override def size: Int = siz
+  override def knownSize: Int = size
+  override def isEmpty: Boolean = size == 0
+  override protected[this] def stringPrefix = "ListMap"
 }
 
 /** $factoryInfo
   *  @define Coll `mutable.ListMap`
   *  @define coll mutable list map
   */
+@SerialVersionUID(3L)
+@deprecated("Use an immutable.ListMap assigned to a var instead of mutable.ListMap", "2.13.0")
 object ListMap extends MapFactory[ListMap] {
   def empty[K, V]: ListMap[K, V] = new ListMap[K, V]
   def from[K, V](it: IterableOnce[(K, V)]): ListMap[K,V] = Growable.from(empty[K, V], it)

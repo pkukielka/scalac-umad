@@ -15,16 +15,15 @@ package scala.concurrent
  *
  *  @tparam A type of data exchanged
  *  @author  Martin Odersky
- *  @version 1.0, 10/03/2003
  */
 class Channel[A] {
-  class LinkedList[A] {
+  private class LinkedList {
     var elem: A = _
-    var next: LinkedList[A] = null
+    var next: LinkedList = null
   }
-  private var written = new LinkedList[A] // FIFO queue, realized through
-  private var lastWritten = written       // aliasing of a linked list
-  private var nreaders = 0
+  private[this] var written = new LinkedList    // FIFO queue, realized through
+  private[this] var lastWritten = written       // aliasing of a linked list
+  private[this] var nreaders = 0
 
   /** Append a value to the FIFO queue to be read by `read`.
    *  This operation is nonblocking and can be executed by any thread.
@@ -33,7 +32,7 @@ class Channel[A] {
    */
   def write(x: A) = synchronized {
     lastWritten.elem = x
-    lastWritten.next = new LinkedList[A]
+    lastWritten.next = new LinkedList
     lastWritten = lastWritten.next
     if (nreaders > 0) notify()
   }

@@ -8,19 +8,16 @@ import scala.language.higherKinds
   */
 trait StrictOptimizedSeqOps [+A, +CC[_], +C]
   extends Any
-    with SeqOps[A, CC, C]
-    with StrictOptimizedIterableOps[A, CC, C] {
+    with StrictOptimizedIterableOps[A, CC, C]
+    with SeqOps[A, CC, C] {
 
   override def distinctBy[B](f: A => B): C = {
     val builder = newSpecificBuilder
     val seen = mutable.HashSet.empty[B]
-
-    for (x <- this) {
-      val y = f(x)
-      if (!seen.contains(y)) {
-        seen += y
-        builder += x
-      }
+    val it = this.iterator
+    while (it.hasNext) {
+      val next = it.next()
+      if (seen.add(f(next))) builder += next
     }
     builder.result()
   }
@@ -45,14 +42,10 @@ trait StrictOptimizedSeqOps [+A, +CC[_], +C]
     b.result()
   }
 
-  override def appendedAll[B >: A](suffix: Iterable[B]): CC[B] = {
-    val b = iterableFactory.newBuilder[B]
-    b ++= this
-    b ++= suffix
-    b.result()
-  }
+  override def appendedAll[B >: A](suffix: IterableOnce[B]): CC[B] =
+    strictOptimizedConcat(suffix, iterableFactory.newBuilder)
 
-  override def prependedAll[B >: A](prefix: Iterable[B]): CC[B] = {
+  override def prependedAll[B >: A](prefix: IterableOnce[B]): CC[B] = {
     val b = iterableFactory.newBuilder[B]
     b ++= prefix
     b ++= this

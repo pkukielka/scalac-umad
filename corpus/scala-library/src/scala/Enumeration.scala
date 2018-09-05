@@ -8,8 +8,10 @@
 
 package scala
 
-import scala.collection.{ mutable, immutable, StrictOptimizedIterableOps, SpecificIterableFactory, View }
-import java.lang.reflect.{ Method => JMethod, Field => JField }
+import scala.collection.{SpecificIterableFactory, StrictOptimizedIterableOps, View, immutable, mutable}
+import java.lang.reflect.{Field => JField, Method => JMethod}
+
+import scala.annotation.implicitNotFound
 import scala.reflect.NameTransformer._
 import scala.util.matching.Regex
 
@@ -24,6 +26,11 @@ import scala.util.matching.Regex
  *  All values in an enumeration share a common, unique type defined as the
  *  `Value` type member of the enumeration (`Value` selected on the stable
  *  identifier path of the enumeration instance).
+ *
+ *  Values SHOULD NOT be added to an enumeration after its construction;
+ *  doing so makes the enumeration thread-unsafe. If values are added to an
+ *  enumeration from multiple threads (in a non-synchronized fashion) after
+ *  construction, the behavior of the enumeration is undefined.
  *
  * @example {{{
  * // Define a new enumeration with a type alias and work with the full set of enumerated values
@@ -99,7 +106,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
 
   /** The mapping from the integer used to identify values to their
     * names. */
-  private val nmap: mutable.Map[Int, String] = new mutable.HashMap
+  private[this] val nmap: mutable.Map[Int, String] = new mutable.HashMap
 
   /** The values of this enumeration as a set.
    */
@@ -122,11 +129,11 @@ abstract class Enumeration (initial: Int) extends Serializable {
 
   /** The highest integer amongst those used to identify values in this
     * enumeration. */
-  private var topId = initial
+  private[this] var topId = initial
 
   /** The lowest integer amongst those used to identify values in this
     * enumeration, but no higher than 0. */
-  private var bottomId = if(initial < 0) initial else 0
+  private[this] var bottomId = if(initial < 0) initial else 0
 
   /** The one higher than the highest integer amongst those used to identify
     *  values in this enumeration. */
@@ -176,7 +183,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
    */
   protected final def Value(i: Int, name: String): Value = new Val(i, name)
 
-  private def populateNameMap() {
+  private def populateNameMap(): Unit = {
     val fields: Array[JField] = getClass.getDeclaredFields
     def isValDef(m: JMethod): Boolean = fields exists (fd => fd.getName == m.getName && fd.getType == m.getReturnType)
 
@@ -247,9 +254,9 @@ abstract class Enumeration (initial: Int) extends Serializable {
       catch { case _: NoSuchElementException => "<Invalid enum: no field for #" + i + ">" }
 
     protected def readResolve(): AnyRef = {
-      val enum = thisenum.readResolve().asInstanceOf[Enumeration]
-      if (enum.vmap == null) this
-      else enum.vmap(i)
+      val enumeration = thisenum.readResolve().asInstanceOf[Enumeration]
+      if (enumeration.vmap == null) this
+      else enumeration.vmap(i)
     }
   }
 
@@ -268,7 +275,7 @@ abstract class Enumeration (initial: Int) extends Serializable {
   class ValueSet private[ValueSet] (private[this] var nnIds: immutable.BitSet)
     extends immutable.AbstractSet[Value]
       with immutable.SortedSet[Value]
-      with immutable.SetOps[Value, immutable.Set, ValueSet]
+      with immutable.SortedSetOps[Value, immutable.SortedSet, ValueSet]
       with StrictOptimizedIterableOps[Value, immutable.Set, ValueSet]
       with Serializable {
 
@@ -277,6 +284,8 @@ abstract class Enumeration (initial: Int) extends Serializable {
       new ValueSet(nnIds.rangeImpl(from.map(_.id - bottomId), until.map(_.id - bottomId)))
 
     override def empty = ValueSet.empty
+    override def knownSize: Int = nnIds.size
+    override def isEmpty: Boolean = nnIds.isEmpty
     def contains(v: Value) = nnIds contains (v.id - bottomId)
     def incl (value: Value) = new ValueSet(nnIds + (value.id - bottomId))
     def excl (value: Value) = new ValueSet(nnIds - (value.id - bottomId))
@@ -287,15 +296,31 @@ abstract class Enumeration (initial: Int) extends Serializable {
      *  new array of longs */
     def toBitMask: Array[Long] = nnIds.toBitMask
 
-    override protected def fromSpecificIterable(coll: Iterable[Value]) = ValueSet.fromSpecific(coll)
+    override protected def fromSpecific(coll: IterableOnce[Value]) = ValueSet.fromSpecific(coll)
     override protected def newSpecificBuilder = ValueSet.newBuilder
 
-    def map(f: Value => Value): ValueSet = fromSpecificIterable(new View.Map(toIterable, f))
-    def flatMap(f: Value => IterableOnce[Value]): ValueSet = fromSpecificIterable(new View.FlatMap(toIterable, f))
+    def map(f: Value => Value): ValueSet = fromSpecific(new View.Map(toIterable, f))
+    def flatMap(f: Value => IterableOnce[Value]): ValueSet = fromSpecific(new View.FlatMap(toIterable, f))
+
+    // necessary for disambiguation:
+    override def map[B](f: Value => B)(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): SortedIterableCC[B] =
+      super[SortedSet].map[B](f)
+    override def flatMap[B](f: Value => IterableOnce[B])(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): SortedIterableCC[B] =
+      super[SortedSet].flatMap[B](f)
+    override def zip[B](that: IterableOnce[B])(implicit @implicitNotFound(ValueSet.zipOrdMsg) ev: Ordering[(Value, B)]): SortedIterableCC[(Value, B)] =
+      super[SortedSet].zip[B](that)
+    override def collect[B](pf: PartialFunction[Value, B])(implicit @implicitNotFound(ValueSet.ordMsg) ev: Ordering[B]): SortedIterableCC[B] =
+      super[SortedSet].collect[B](pf)
+
+    override protected[this] def writeReplace(): AnyRef = this
   }
 
   /** A factory object for value sets */
+  @SerialVersionUID(3L)
   object ValueSet extends SpecificIterableFactory[Value, ValueSet] {
+    private final val ordMsg = "No implicit Ordering[${B}] found to build a SortedSet[${B}]. You may want to upcast to a Set[Value] first by calling `unsorted`."
+    private final val zipOrdMsg = "No implicit Ordering[${B}] found to build a SortedSet[(Value, ${B})]. You may want to upcast to a Set[Value] first by calling `unsorted`."
+
     /** The empty value set */
     val empty = new ValueSet(immutable.BitSet.empty)
     /** A value set containing all the values for the zero-adjusted ids

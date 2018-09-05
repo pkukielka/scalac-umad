@@ -14,7 +14,6 @@ import scala.collection.mutable.{Builder, ImmutableBuilder}
   *
   *  @author  Erik Stenman
   *  @author  Matthias Zenger
-  *  @version 1.1, 03/05/2004
   *  @since   1
   *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-immutable-collection-classes.html#red-black-trees "Scala's Collection Library overview"]]
   *  section on `Red-Black Trees` for more information.
@@ -26,21 +25,21 @@ import scala.collection.mutable.{Builder, ImmutableBuilder}
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 final class TreeMap[K, +V] private (tree: RB.Tree[K, V])(implicit val ordering: Ordering[K])
   extends AbstractMap[K, V]
     with SortedMap[K, V]
     with SortedMapOps[K, V, TreeMap, TreeMap[K, V]]
     with StrictOptimizedIterableOps[(K, V), Iterable, TreeMap[K, V]]
-    with Serializable {
+    with StrictOptimizedMapOps[K, V, Map, TreeMap[K, V]]
+    with StrictOptimizedSortedMapOps[K, V, TreeMap, TreeMap[K, V]] {
 
   def this()(implicit ordering: Ordering[K]) = this(null)(ordering)
 
   override def sortedMapFactory = TreeMap
 
-  def iterator: collection.Iterator[(K, V)] = RB.iterator(tree)
+  def iterator: Iterator[(K, V)] = RB.iterator(tree)
 
-  def keysIteratorFrom(start: K): collection.Iterator[K] = RB.keysIterator(tree, Some(start))
+  def keysIteratorFrom(start: K): Iterator[K] = RB.keysIterator(tree, Some(start))
 
   def iteratorFrom(start: K): Iterator[(K, V)] = RB.iterator(tree, Some(start))
 
@@ -72,12 +71,12 @@ final class TreeMap[K, +V] private (tree: RB.Tree[K, V])(implicit val ordering: 
 
   override def minAfter(key: K): Option[(K, V)] = RB.minAfter(tree, key) match {
     case null => Option.empty
-    case x => Some(x.key, x.value)
+    case x => Some((x.key, x.value))
   }
 
   override def maxBefore(key: K): Option[(K, V)] = RB.maxBefore(tree, key) match {
     case null => Option.empty
-    case x => Some(x.key, x.value)
+    case x => Some((x.key, x.value))
   }
 
   override def range(from: K, until: K): TreeMap[K,V] = new TreeMap[K, V](RB.range(tree, from, until))
@@ -85,6 +84,9 @@ final class TreeMap[K, +V] private (tree: RB.Tree[K, V])(implicit val ordering: 
   override def foreach[U](f: ((K, V)) => U): Unit = RB.foreach(tree, f)
 
   override def size: Int = RB.count(tree)
+  override def knownSize: Int = size
+
+  override def isEmpty = size == 0
 
   override def firstKey: K = RB.smallest(tree).key
 
@@ -140,17 +142,19 @@ final class TreeMap[K, +V] private (tree: RB.Tree[K, V])(implicit val ordering: 
 
   override def span(p: ((K, V)) => Boolean): (TreeMap[K, V], TreeMap[K, V]) = splitAt(countWhile(p))
 
+  override protected[this] def className = "TreeMap"
 }
 
 /** $factoryInfo
   *  @define Coll immutable.TreeMap
   *  @define coll immutable tree map
   */
+@SerialVersionUID(3L)
 object TreeMap extends SortedMapFactory[TreeMap] {
 
   def empty[K : Ordering, V]: TreeMap[K, V] = new TreeMap()
 
-  def from[K : Ordering, V](it: collection.IterableOnce[(K, V)]): TreeMap[K, V] =
+  def from[K : Ordering, V](it: IterableOnce[(K, V)]): TreeMap[K, V] =
     it match {
       case tm: TreeMap[K, V] => tm
       case _ => (newBuilder[K, V] ++= it).result()

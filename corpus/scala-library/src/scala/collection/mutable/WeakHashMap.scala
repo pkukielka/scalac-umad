@@ -10,7 +10,6 @@ package scala
 package collection
 package mutable
 
-import generic._
 import convert.Wrappers._
 
 /** A hash map with references to entries which are weakly reachable. Entries are
@@ -29,17 +28,18 @@ import convert.Wrappers._
  *  @define mayNotTerminateInf
  *  @define willNotTerminateInf
  */
-@SerialVersionUID(3L)
 class WeakHashMap[A, B] extends JMapWrapper[A, B](new java.util.WeakHashMap)
     with JMapWrapperLike[A, B, WeakHashMap, WeakHashMap[A, B]] {
   override def empty = new WeakHashMap[A, B]
   override def mapFactory: MapFactory[WeakHashMap] = WeakHashMap
+  override protected[this] def stringPrefix = "WeakHashMap"
 }
 
 /** $factoryInfo
  *  @define Coll `WeakHashMap`
  *  @define coll weak hash map
  */
+@SerialVersionUID(3L)
 object WeakHashMap extends MapFactory[WeakHashMap] {
   def empty[K, V]: WeakHashMap[K,V] = new WeakHashMap[K, V]
   def from[K, V](it: collection.IterableOnce[(K, V)]): WeakHashMap[K,V] = Growable.from(empty[K, V], it)

@@ -2,8 +2,9 @@ package scala
 package collection
 package immutable
 
-import mutable.{Builder, ImmutableBuilder}
+import java.io.{ObjectInputStream, ObjectOutputStream}
 
+import mutable.{Builder, ImmutableBuilder}
 import scala.annotation.tailrec
 
 /**
@@ -21,23 +22,21 @@ import scala.annotation.tailrec
   * @tparam A the type of the elements contained in this list set
   *
   * @author Matthias Zenger
-  * @version 1.0, 09/07/2003
   * @since 1
   * @define Coll ListSet
   * @define coll list set
   * @define mayNotTerminateInf
   * @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 sealed class ListSet[A]
   extends AbstractSet[A]
     with SetOps[A, ListSet, ListSet[A]]
-    with StrictOptimizedIterableOps[A, ListSet, ListSet[A]]
-    with Serializable {
+    with StrictOptimizedIterableOps[A, ListSet, ListSet[A]] {
 
-  override def className: String = "ListSet"
+  override protected[this] def className: String = "ListSet"
 
   override def size: Int = 0
+  override def knownSize: Int = 0
   override def isEmpty: Boolean = true
 
   def contains(elem: A): Boolean = false
@@ -63,11 +62,10 @@ sealed class ListSet[A]
   /**
     * Represents an entry in the `ListSet`.
     */
-  @SerialVersionUID(3L)
-  protected class Node(override protected val elem: A) extends ListSet[A] with Serializable {
+  protected class Node(override protected val elem: A) extends ListSet[A] {
 
     override def size = sizeInternal(this, 0)
-
+    override def knownSize: Int = -1
     @tailrec private[this] def sizeInternal(n: ListSet[A], acc: Int): Int =
       if (n.isEmpty) acc
       else sizeInternal(n.next, acc + 1)
@@ -107,16 +105,19 @@ sealed class ListSet[A]
   * @define Coll ListSet
   * @define coll list set
   */
+@SerialVersionUID(3L)
 object ListSet extends IterableFactory[ListSet] {
 
   def from[E](it: scala.collection.IterableOnce[E]): ListSet[E] =
     it match {
       case ls: ListSet[E] => ls
+      case _ if it.knownSize == 0 => empty[E]
       case _ => (newBuilder[E] ++= it).result()
     }
 
-  @SerialVersionUID(3L)
-  private object EmptyListSet extends ListSet[Any]
+  private object EmptyListSet extends ListSet[Any] {
+    override def knownSize: Int = 0
+  }
   private[collection] def emptyInstance: ListSet[Any] = EmptyListSet
 
   def empty[A]: ListSet[A] = EmptyListSet.asInstanceOf[ListSet[A]]
@@ -125,5 +126,9 @@ object ListSet extends IterableFactory[ListSet] {
     new ImmutableBuilder[A, ListSet[A]](empty) {
       def addOne(elem: A): this.type = { elems = elems + elem; this }
     }
-}
 
+  // scalac generates a `readReplace` method to discard the deserialized state (see https://github.com/scala/bug/issues/10412).
+  // This prevents it from serializing it in the first place:
+  private[this] def writeObject(out: ObjectOutputStream): Unit = ()
+  private[this] def readObject(in: ObjectInputStream): Unit = ()
+}

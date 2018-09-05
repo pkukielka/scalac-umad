@@ -1,7 +1,7 @@
 package scala
 package collection.mutable
 
-import collection.Iterator
+import collection.{AbstractIterator, Iterator}
 
 import java.lang.{Integer, ThreadLocal}
 
@@ -47,6 +47,8 @@ private[mutable] final class FlatHashTable[A] extends FlatHashTable.HashUtils[A]
   /** The initial size of the hash table.
    */
   def initialSize: Int = 32
+
+  def size: Int = tableSize
 
   private def initialCapacity = capacity(initialSize)
 
@@ -192,8 +194,8 @@ private[mutable] final class FlatHashTable[A] extends FlatHashTable.HashUtils[A]
     false
   }
 
-  def iterator: Iterator[A] = new Iterator[A] {
-    private var i = 0
+  def iterator: Iterator[A] = new AbstractIterator[A] {
+    private[this] var i = 0
     def hasNext: Boolean = {
       while (i < table.length && (null == table(i))) i += 1
       i < table.length
@@ -222,7 +224,7 @@ private[mutable] final class FlatHashTable[A] extends FlatHashTable.HashUtils[A]
   private def checkConsistent() = {
     for (i <- 0 until table.length)
       if (table(i) != null && !containsElem(entryToElem(table(i))))
-        assert(assertion = false, i+" "+table(i)+" "+table.mkString)
+        assert(assertion = false, s"$i ${table(i)} ${table.mkString}")
   }
 
 

@@ -1,9 +1,7 @@
 package scala
 package collection.mutable
 
-import scala.collection.{Iterator, MapFactory, StrictOptimizedIterableOps}
-
-import java.lang.String
+import scala.collection.{Iterator, MapFactory, StrictOptimizedIterableOps, StrictOptimizedMapOps}
 
 /** This class implements mutable maps using a hashtable.
   *
@@ -19,12 +17,11 @@ import java.lang.String
   *  @define mayNotTerminateInf
   *  @define willNotTerminateInf
   */
-@SerialVersionUID(3L)
 class HashMap[K, V]
   extends AbstractMap[K, V]
     with MapOps[K, V, HashMap, HashMap[K, V]]
     with StrictOptimizedIterableOps[(K, V), Iterable, HashMap[K, V]]
-    with Serializable {
+    with StrictOptimizedMapOps[K, V, HashMap, HashMap[K, V]] {
 
   override def mapFactory: MapFactory[HashMap] = HashMap
 
@@ -40,7 +37,22 @@ class HashMap[K, V]
       def createNewEntry(key: K, value: V): Entry = new Entry(key, value)
     }
 
-  def iterator: Iterator[(K, V)] = table.entriesIterator.map(e => (e.key, e.value))
+  override def isEmpty: Boolean = table.size == 0
+  override def knownSize: Int = table.size
+
+  def iterator: Iterator[(K, V)] = {
+    if (isEmpty) Iterator.empty
+    else table.entriesIterator.map(e => (e.key, e.value))
+  }
+
+  override def keysIterator: Iterator[K] = {
+    if (isEmpty) Iterator.empty
+    else table.entriesIterator.map(_.key)
+  }
+  override def valuesIterator: Iterator[V] = {
+    if (isEmpty) Iterator.empty
+    else table.entriesIterator.map(_.value)
+  }
 
   def get(key: K): Option[V] = {
     val e = table.findEntry(key)
@@ -53,7 +65,7 @@ class HashMap[K, V]
     this
   }
 
-  def clear(): Unit = table.clearTable()
+  override def clear(): Unit = table.clearTable()
 
   def subtractOne(key: K): this.type = { table.removeEntry(key); this }
 
@@ -76,24 +88,45 @@ class HashMap[K, V]
     else { val v = e.value; e.value = value; Some(v) }
   }
 
+  override def update(key: K, value: V): Unit = {
+    val e = table.findOrAddEntry(key, value)
+    if (e ne null) e.value = value
+  }
+
   override def getOrElseUpdate(key: K, defaultValue: => V): V = {
-    val hash = table.elemHashCode(key)
-    val i = table.index(hash)
-    val firstEntry = table.findEntry0(key, i)
-    if (firstEntry != null) firstEntry.value
-    else {
-      val table0 = table.table
-      val default = defaultValue
-      // Avoid recomputing index if the `defaultValue()` hasn't triggered
-      // a table resize.
-      val newEntryIndex = if (table0 eq table.table) i else table.index(hash)
-      val e = table.createNewEntry(key, default)
-      // Repeat search
-      // because evaluation of `default` can bring entry with `key`
-      val secondEntry = table.findEntry0(key, newEntryIndex)
-      if (secondEntry == null) table.addEntry0(e, newEntryIndex)
-      else secondEntry.value = default
-      default
+    if (getClass != classOf[HashMap[_, _]]) {
+      // subclasses of HashMap might customise `get` ...
+      super.getOrElseUpdate(key, defaultValue)
+    } else {
+      val hash = table.elemHashCode(key)
+      val i = table.index(hash)
+      val firstEntry = table.findEntry0(key, i)
+      if (firstEntry != null) firstEntry.value
+      else {
+        val table0 = table.table
+        val default = defaultValue
+        // Avoid recomputing index if the `defaultValue()` hasn't triggered
+        // a table resize.
+        val newEntryIndex = if (table0 eq table.table) i else table.index(hash)
+        val e = table.createNewEntry(key, default)
+        // Repeat search
+        // because evaluation of `default` can bring entry with `key`
+        val secondEntry = table.findEntry0(key, newEntryIndex)
+        if (secondEntry == null) table.addEntry0(e, newEntryIndex)
+        else secondEntry.value = default
+        default
+      }
+    }
+  }
+
+  override def getOrElse[V1 >: V](key: K, default: => V1): V1 = {
+    if (getClass != classOf[HashMap[_, _]]) {
+      // subclasses of HashMap might customise `get` ...
+      super.getOrElse(key, default)
+    } else {
+      // .. but in the common case, we can avoid the Option boxing.
+      val e = table.findEntry(key)
+      if (e eq null) default else e.value
     }
   }
 
@@ -111,6 +144,7 @@ class HashMap[K, V]
     table.init(in, table.createNewEntry(in.readObject().asInstanceOf[K], in.readObject().asInstanceOf[V]))
   }
 
+  override protected[this] def stringPrefix = "HashMap"
 }
 
 /**
@@ -118,6 +152,7 @@ class HashMap[K, V]
   *  @define Coll `mutable.HashMap`
   *  @define coll mutable hash map
   */
+@SerialVersionUID(3L)
 object HashMap extends MapFactory[HashMap] {
 
   def empty[K, V]: HashMap[K, V] = new HashMap[K, V]
@@ -131,10 +166,8 @@ object HashMap extends MapFactory[HashMap] {
 /** Class used internally for default map model.
   *  @since 2.3
   */
-@SerialVersionUID(3L)
 private[mutable] final class DefaultEntry[A, B](val key: A, var value: B)
-  extends HashEntry[A, DefaultEntry[A, B]]
-    with Serializable {
+  extends HashEntry[A, DefaultEntry[A, B]] {
 
   override def toString = chainString
 

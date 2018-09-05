@@ -1,6 +1,8 @@
 package scala
 package collection
 
+import java.io.{ObjectInputStream, ObjectOutputStream}
+
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.mutable.Builder
 
@@ -18,15 +20,51 @@ import scala.collection.mutable.Builder
   * @define Coll `BitSet`
   */
 trait BitSet extends SortedSet[Int] with BitSetOps[BitSet] {
-  override protected def fromSpecificIterable(coll: Iterable[Int]): BitSetC = bitSetFactory.fromSpecific(coll)
+  override protected def fromSpecific(coll: IterableOnce[Int]): BitSetC = bitSetFactory.fromSpecific(coll)
   override protected def newSpecificBuilder: Builder[Int, BitSetC] = bitSetFactory.newBuilder
   override def empty: BitSetC = bitSetFactory.empty
+  override protected[this] def stringPrefix = "BitSet"
+  override def unsorted: Set[Int] = this
 }
 
+@SerialVersionUID(3L)
 object BitSet extends SpecificIterableFactory[Int, BitSet] {
+  private[collection] final val ordMsg = "No implicit Ordering[${B}] found to build a SortedSet[${B}]. You may want to upcast to a Set[Int] first by calling `unsorted`."
+  private[collection] final val zipOrdMsg = "No implicit Ordering[${B}] found to build a SortedSet[(Int, ${B})]. You may want to upcast to a Set[Int] first by calling `unsorted`."
+
   def empty: BitSet = immutable.BitSet.empty
   def newBuilder: Builder[Int, BitSet] = immutable.BitSet.newBuilder
   def fromSpecific(it: IterableOnce[Int]): BitSet = immutable.BitSet.fromSpecific(it)
+
+  @SerialVersionUID(3L)
+  private[collection] abstract class SerializationProxy(@transient protected val coll: BitSet) extends Serializable {
+
+    @transient protected var elems: Array[Long] = _
+
+    private[this] def writeObject(out: ObjectOutputStream): Unit = {
+      out.defaultWriteObject()
+      val nwords = coll.nwords
+      out.writeInt(nwords)
+      var i = 0
+      while(i < nwords) {
+        out.writeLong(coll.word(i))
+        i += 1
+      }
+    }
+
+    private[this] def readObject(in: ObjectInputStream): Unit = {
+      in.defaultReadObject()
+      val nwords = in.readInt()
+      elems = new Array[Long](nwords)
+      var i = 0
+      while(i < nwords) {
+        elems(i) = in.readLong()
+        i += 1
+      }
+    }
+
+    protected[this] def readResolve(): Any
+  }
 }
 
 /** Base implementation type of bitsets */
@@ -36,8 +74,10 @@ trait BitSetOps[+C <: BitSet with BitSetOps[C]]
 
   def bitSetFactory: SpecificIterableFactory[Int, BitSetC]
 
+  def unsorted: Set[Int]
+
   /**
-    * Type alias to `C`. It is used to provide a default implementation of the `fromSpecificIterable`
+    * Type alias to `C`. It is used to provide a default implementation of the `fromSpecific`
     * and `newSpecificBuilder` operations.
     *
     * Due to the `@uncheckedVariance` annotation, usage of this type member can be unsound and is
@@ -64,9 +104,9 @@ trait BitSetOps[+C <: BitSet with BitSetOps[C]]
 
   def iterator: Iterator[Int] = iteratorFrom(0)
 
-  def iteratorFrom(start: Int) = new Iterator[Int] {
-    private var current = start
-    private val end = nwords * WordLength
+  def iteratorFrom(start: Int): Iterator[Int] = new AbstractIterator[Int] {
+    private[this] var current = start
+    private[this] val end = nwords * WordLength
     def hasNext: Boolean = {
       while (current != end && !self.contains(current)) current += 1
       current != end
@@ -145,6 +185,36 @@ trait BitSetOps[+C <: BitSet with BitSetOps[C]]
     coll.fromBitMaskNoCopy(a)
   }
 
+  override def concat(other: collection.IterableOnce[Int]): C = other match {
+    case otherBitset: BitSet =>
+      val len = coll.nwords max otherBitset.nwords
+      val words = new Array[Long](len)
+      for (idx <- 0 until len)
+        words(idx) = this.word(idx) | otherBitset.word(idx)
+      fromBitMaskNoCopy(words)
+    case _ => super.concat(other)
+  }
+
+  override def intersect(other: Set[Int]): C = other match {
+    case otherBitset: BitSet =>
+      val len = coll.nwords min otherBitset.nwords
+      val words = new Array[Long](len)
+      for (idx <- 0 until len)
+        words(idx) = this.word(idx) & otherBitset.word(idx)
+      fromBitMaskNoCopy(words)
+    case _ => super.intersect(other)
+  }
+
+  abstract override def diff(other: Set[Int]): C = other match {
+    case otherBitset: BitSet =>
+      val len = coll.nwords
+      val words = new Array[Long](len)
+      for (idx <- 0 until len)
+        words(idx) = this.word(idx) & ~otherBitset.word(idx)
+      fromBitMaskNoCopy(words)
+    case _ => super.diff(other)
+  }
+
   /** Computes the symmetric difference of this bitset and another bitset by performing
     *  a bitwise "exclusive-or".
     *
@@ -168,10 +238,11 @@ trait BitSetOps[+C <: BitSet with BitSetOps[C]]
     * @return a new bitset resulting from applying the given function ''f'' to
     *         each element of this bitset and collecting the results
     */
-  def map(f: Int => Int): C = fromSpecificIterable(new View.Map(toIterable, f))
+  def map(f: Int => Int): C = fromSpecific(new View.Map(toIterable, f))
 
-  def flatMap(f: Int => IterableOnce[Int]): C = fromSpecificIterable(new View.FlatMap(toIterable, f))
+  def flatMap(f: Int => IterableOnce[Int]): C = fromSpecific(new View.FlatMap(toIterable, f))
 
+  def collect(pf: PartialFunction[Int, Int]): C = fromSpecific(super[SortedSetOps].collect(pf).toIterable)
 }
 
 object BitSetOps {
