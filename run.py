@@ -50,8 +50,10 @@ if options.debugPort:
         "-J-agentlib:jdwp=transport=dt_socket,server=n,address=localhost:{},suspend=y".format(options.debugPort)]
 
 classpathSeparator = ";" if os.name == 'nt' else ":"
+runMvn = "mvn.cmd" if os.name == 'nt' else "mvn"
+runScalac = "scalac.bat" if os.name == 'nt' else "scalac"
 
-assert subprocess.call(["mvn", "package"], cwd="umad") == 0
+assert subprocess.call([runMvn, "package"], cwd="umad") == 0
 
 outputBase = tempfile.mkdtemp()
 scalaOutput = os.path.join(outputBase, "scala")
@@ -63,20 +65,27 @@ os.mkdir(baselineOutput)
 def call_compiler(scalaLocation, output, additionalScalacOptions, additionalConfig=[]):
     agentJar = os.path.join(".", "umad", "target", "umad-1.0-SNAPSHOT.jar")
     configOverrides = map(lambda v: "-J-D" + v, options.config + additionalConfig)
+    tmp = tempfile.NamedTemporaryFile(suffix=".txt", prefix="params", delete=False)
+    paramsList = [configOverrides, scalacOptions, sources, debugOptions, additionalScalacOptions]
+    with open(tmp.name, 'w') as paramsFile:
+        for params in paramsList:
+            for param in params:
+                paramsFile.write(param + "\n")
+        paramsFile.flush()
+
     timeBefore = time.time()
     subprocess.call([
-                        os.path.join(scalaLocation, "bin", "scalac"),
+                        os.path.join(scalaLocation, "bin", runScalac),
                         "-cp", classpathSeparator.join(scalaJars + jars),
                         "-d", output,
                         "-J-javaagent:" + agentJar,
-                        "-toolcp", agentJar
-                    ] +
-                    configOverrides +
-                    scalacOptions +
-                    sources +
-                    debugOptions +
-                    additionalScalacOptions)
+                        "-toolcp", agentJar,
+                        "@"+tmp.name
+                    ])
+    tmp.close()
+    os.remove(tmp.name)
     return time.time() - timeBefore
+
 
 
 compilation_time = call_compiler(options.scala, scalaOutput, options.additionalOptions)
