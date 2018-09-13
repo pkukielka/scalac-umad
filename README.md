@@ -15,9 +15,15 @@ sbt dist/mkPack
 
 Usage:
 
+On Unix
 ```
 cd <WORKSPACE>/scala-umad
-./run.py -s <WORKSPACE>/scalac_perf/build/pack/ -- -Yparallel-phases:parser,refchecks,patmat -Yparallel-sequential
+./run.py -s ../scalac_perf/build/pack/ -- -Yparallel-phases:parser,refchecks,patmat -Yparallel-sequential
+```
+On Windows
+```
+cd <WORKSPACE>\scala-umad
+.\run.py -s ..\scalac_perf\build\pack\ -- -Yparallel-phases:parser,refchecks,patmat -Yparallel-sequential
 ```
 
 Umad parameters are before `--`, jvm (scalac) parameters are after. 
